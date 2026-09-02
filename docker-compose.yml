@@ -1,0 +1,21 @@
+services:
+  profile-service:
+    build: ./services/profile-service
+    ports:
+      - "8081:8081"
+    environment:
+      PORT: 8081
+
+  cashflow-service:
+    build: ./services/cashflow-service
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: 8082
+
+  savings-service:
+    build: ./services/savings-service
+    ports:
+      - "8083:8083"
+    environment:
+      PORT: 8083
