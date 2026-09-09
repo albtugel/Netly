@@ -4,42 +4,47 @@
 
 Персональные финансы: учёт доходов, обязательных расходов, подписок, задолженностей и накопительных целей. Приложение приводит доходы разной периодичности к месячному эквиваленту, вычисляет свободный остаток и распределяет его между целями по приоритетам.
 
-Клиент — приложение для iOS на SwiftUI. Серверная часть — три независимых микросервиса на Swift.
+Клиент — приложение для iOS на SwiftUI. Серверная часть — два независимых микросервиса на Swift.
 
 Бизнес-задача, пользовательские истории с критериями приёмки и декомпозиция на микросервисы: [`docs/requirements.md`](docs/requirements.md).
 
 ## Архитектура
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture-dark.png">
-  <img alt="Архитектура Netly" src="docs/architecture.png">
-</picture>
+![Архитектура Netly](docs/architecture.png)
 
-Публичной является только зона API Gateway. Микросервисы, базы данных и брокер размещаются во внутренней сети и недоступны извне. Сервисы взаимодействуют между собой асинхронно через шину событий, прямые синхронные вызовы не предусмотрены.
+Клиент обращается к обоим сервисам напрямую по HTTPS. Аутентификация выполняется по JWT: токен выдаёт Profile Service, Budget Service проверяет его подпись общим секретом. Базы данных размещены во внутренней сети и недоступны извне.
 
-| Сервис | Зона ответственности | Порт |
-|---|---|---|
-| `profile-service` | Аутентификация, онбординг, источники дохода, обязательные расходы | 8081 |
-| `cashflow-service` | Подписки, задолженности, расчёт денежного потока | 8082 |
-| `savings-service` | Накопительные цели, распределение остатка, уведомления | 8083 |
+Внутри системы предусмотрен один синхронный вызов в одну сторону: Budget Service запрашивает у Profile Service месячный доход и обязательные расходы. Обратных вызовов и циклов нет.
+
+| Сервис            | Зона ответственности                                              | Порт |
+| ----------------- | ----------------------------------------------------------------- | ---- |
+| `profile-service` | Аутентификация, онбординг, источники дохода, обязательные расходы  | 8081 |
+| `budget-service`  | Подписки, задолженности, цели, расчёт свободного остатка           | 8082 |
 
 ## Технологический стек
 
-| Компонент | Технология | Язык | Хранилище |
-|---|---|---|---|
-| Клиент | SwiftUI, iOS 17+ | Swift | SwiftData |
-| API Gateway | Vapor | Swift | — |
-| Profile Service | Vapor, Fluent | Swift | PostgreSQL |
-| Cashflow Service | Vapor, Fluent, Queues | Swift | PostgreSQL, Redis |
-| Savings Service | Hummingbird | Swift | PostgreSQL |
-| Шина сообщений | RabbitMQ | — | — |
-| Среда исполнения | Docker, Docker Compose | — | — |
+| Компонент        | Технология             | Язык  | Хранилище          |
+| ---------------- | ---------------------- | ----- | ------------------ |
+| Клиент           | SwiftUI, iOS 17+       | Swift | SwiftData          |
+| Profile Service  | Vapor, Fluent, JWT     | Swift | PostgreSQL         |
+| Budget Service   | Hummingbird, PostgresNIO | Swift | PostgreSQL       |
+| Среда исполнения | Docker, Docker Compose | —     | —                  |
+
+Выбор фреймворка для каждого сервиса обоснован в [`docs/requirements.md`](docs/requirements.md). Кратко: Profile Service работает со связанной реляционной моделью и отвечает за аутентификацию, поэтому использует полнофункциональный Vapor с ORM и модулем JWT. Budget Service имеет плоскую модель данных и преимущественно вычислительную нагрузку, поэтому использует минималистичный Hummingbird с прямым драйвером PostgresNIO. Это то же противопоставление, что Django и Flask в экосистеме Python.
 
 ## Как запустить
 
-Текущее состояние: реализованы скелеты трёх сервисов с эндпоинтом `/health`.
+Текущее состояние: реализованы скелеты двух сервисов с эндпоинтом `/health`.
 
-Требуется Swift 6.0 или новее.
+Требуется Swift 6.0 или новее, либо Docker.
+
+### Все сервисы через Docker
+
+```bash
+docker compose up --build
+```
+
+Поднимаются три контейнера: `profile`, `budget` и `postgres` с двумя базами.
 
 ### Отдельный сервис
 
@@ -48,18 +53,11 @@ cd services/profile-service
 swift run
 ```
 
-### Все сервисы через Docker
-
-```bash
-docker compose up --build
-```
-
 ### Проверка
 
 ```bash
 curl http://localhost:8081/health
 curl http://localhost:8082/health
-curl http://localhost:8083/health
 ```
 
 Ответ:
@@ -75,10 +73,10 @@ netly/
 ├── docs/
 │   ├── requirements.md          бизнес-задача, истории, декомпозиция
 │   ├── architecture.drawio      исходник схемы
-│   ├── architecture.png
-│   └── architecture-dark.png
-└── services/
-    ├── profile-service/
-    ├── cashflow-service/
-    └── savings-service/
+│   └── architecture.png
+├── services/
+│   ├── profile-service/
+│   └── budget-service/
+├── docker-compose.yml
+└── README.md
 ```
