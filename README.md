@@ -75,9 +75,9 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service has an implemented skeleton with a `/health` endpoint. Budget Service is designed but not yet implemented — `services/budget-service/` is still a placeholder, so the `budget` container declared in `docker-compose.yml` cannot be built yet. Spending Service is designed as well; its implementation is planned.
+Current state: Profile Service and Budget Service both have an implemented skeleton with a `/health` endpoint, so the whole `docker compose` stack builds and starts. Spending Service is designed; its implementation is planned.
 
-Requires Swift 6.0 or newer, or Docker.
+Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker.
 
 ### All services via Docker
 
@@ -92,8 +92,21 @@ Once Spending Service is implemented, a `spending` container and a `netly_spendi
 ### A single service
 
 ```bash
-cd services/profile-service
+cd services/profile-service   # or services/budget-service
 swift run
+```
+
+### Tests
+
+```bash
+cd services/budget-service
+swift test
+```
+
+Without a local Swift 6.2 toolchain, run the tests in the same image the Dockerfile uses:
+
+```bash
+docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
 
 ### Health check
