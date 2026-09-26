@@ -45,6 +45,8 @@ func buildRouter(
     let api = router.group("api/v1")
         .add(middleware: JWTAuthenticator(keys: keys))
     ResourceController(repository: repositories.subscriptions, clock: clock).addRoutes(to: api)
+    ResourceController(repository: repositories.debts, clock: clock).addRoutes(to: api)
+    ResourceController(repository: repositories.goals, clock: clock).addRoutes(to: api)
 
     return router
 }

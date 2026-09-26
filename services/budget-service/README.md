@@ -54,20 +54,28 @@ Every error is returned as `application/problem+json` (RFC 9457) with two extens
 
 All `/api/v1` routes require `Authorization: Bearer <jwt>` and only see the caller's own records; another user's record answers `404`.
 
-| Method | Path                         | Description                                       |
-| ------ | ---------------------------- | ------------------------------------------------- |
-| GET    | `/health`                    | Service health check                              |
-| POST   | `/api/v1/subscriptions`      | Create; `201` with a `Location` header            |
-| GET    | `/api/v1/subscriptions`      | List, `?limit=1..100` (default 50) `&offset=0..`  |
-| GET    | `/api/v1/subscriptions/{id}` | Read one                                          |
-| PATCH  | `/api/v1/subscriptions/{id}` | Partial update; the merged record is re-validated |
-| DELETE | `/api/v1/subscriptions/{id}` | Delete; `204`                                     |
+| Method | Path                       | Description                                       |
+| ------ | -------------------------- | ------------------------------------------------- |
+| GET    | `/health`                  | Service health check                              |
+| POST   | `/api/v1/{resource}`       | Create; `201` with a `Location` header            |
+| GET    | `/api/v1/{resource}`       | List, `?limit=1..100` (default 50) `&offset=0..`  |
+| GET    | `/api/v1/{resource}/{id}`  | Read one                                          |
+| PATCH  | `/api/v1/{resource}/{id}`  | Partial update; the merged record is re-validated |
+| DELETE | `/api/v1/{resource}/{id}`  | Delete; `204`                                     |
 
-A subscription has `name` (1–100 chars), `price` (> 0, ≤ 1 000 000, cents precision), `billingCycle` (`weekly`, `monthly`, `quarterly`, `yearly`) and `nextChargeDate` (`YYYY-MM-DD`). The read-only `monthlyCost` converts the price to a monthly equivalent.
+`{resource}` is `subscriptions`, `debts` or `goals`.
+
+| Resource     | Fields                                                                                                                                                              | Read-only                     |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| subscription | `name` 1–100 chars; `price` > 0, ≤ 1 000 000; `billingCycle` `weekly` \| `monthly` \| `quarterly` \| `yearly`; `nextChargeDate`                                     | `monthlyCost`                 |
+| debt         | `creditor` 1–100 chars; `amount` > 0, ≤ 100 000 000; `dueDate` after today                                                                                         | `monthlyPayment`              |
+| goal         | `name` 1–100 chars; `targetAmount` > 0; `savedAmount` 0..`targetAmount` (default 0); `targetDate` after today; `priority` 1–10; `status` `active` \| `completed` \| `archived` | `requiredMonthlyContribution` |
+
+Every resource also has read-only `id`, `createdAt` and `updatedAt`. Money has at most two decimal places; dates are `YYYY-MM-DD`. A "date after today" rule applies only when the client sets or changes that date, so an overdue debt can still be edited.
 
 Storage is in memory for now; PostgreSQL arrives in a later step.
 
-Example response:
+`GET /health` response:
 
 ```json
 { "status": "ok", "service": "netly-budget" }
