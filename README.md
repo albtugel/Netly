@@ -16,7 +16,7 @@ The business problem, user stories with acceptance criteria and the decompositio
 
 > The diagram currently shows Profile Service and Budget Service. `spending-service` is described below and will be added to the diagram along with its implementation.
 
-The client talks to all three services directly over HTTPS. Authentication is based on JWT: the token is issued by Profile Service, while Budget Service and Spending Service verify its signature with a shared secret. The databases live on the internal network and are not reachable from outside.
+The client talks to all three services directly over HTTPS. Authentication is based on JWT: the token is issued by Profile Service, while Budget Service and Spending Service verify its signature with a shared secret. The token is signed with HS256, carries the user id in `sub` and an expiry in `exp`; the shared `JWT_SECRET` must be at least 32 bytes long, and Budget Service refuses to start otherwise. The databases live on the internal network and are not reachable from outside.
 
 The system contains a single synchronous call, in one direction only: Budget Service asks Profile Service for the monthly income and mandatory expenses. There are no reverse calls and no cycles.
 
@@ -84,6 +84,8 @@ Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which need
 ```bash
 docker compose up --build
 ```
+
+Set `JWT_SECRET` (at least 32 bytes) to override the development secret used by default.
 
 This brings up the `profile`, `budget` and `postgres` containers, with `postgres` hosting two databases (`netly_profile` and `netly_budget`).
 

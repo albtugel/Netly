@@ -19,7 +19,7 @@ services:
     build: ./services/profile-service
     environment:
       DATABASE_URL: postgres://netly:netly@postgres:5432/netly_profile
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_SECRET: ${JWT_SECRET:-netly-dev-jwt-secret-change-me-32bytes}
     ports:
       - "8081:8081"
     depends_on:
@@ -30,7 +30,7 @@ services:
     build: ./services/budget-service
     environment:
       DATABASE_URL: postgres://netly:netly@postgres:5432/netly_budget
-      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      JWT_SECRET: ${JWT_SECRET:-netly-dev-jwt-secret-change-me-32bytes}
       PROFILE_SERVICE_URL: http://profile:8081
     ports:
       - "8082:8082"
