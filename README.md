@@ -75,7 +75,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, stored in PostgreSQL, with monthly equivalents computed on read and a unified `application/problem+json` error format (see [`services/budget-service/README.md`](services/budget-service/README.md)). Spending Service is designed; its implementation is planned.
+Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, stored in PostgreSQL, with monthly equivalents computed on read and a unified `application/problem+json` error format. The API contract is [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
 Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker.
 
@@ -111,6 +111,17 @@ Without a local Swift 6.2 toolchain, run the tests in the same image the Dockerf
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
 
+### Calling the Budget API
+
+Profile Service does not issue tokens yet, so mint a development JWT signed with the compose secret:
+
+```bash
+TOKEN=$(scripts/dev-token.sh)
+curl -X POST http://localhost:8082/api/v1/subscriptions \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Netflix", "price": 119.88, "billingCycle": "yearly", "nextChargeDate": "2026-10-15"}'
+```
+
 ### Health check
 
 ```bash
@@ -129,11 +140,15 @@ Response:
 ```
 netly/
 ├── docs/
+│   ├── api/
+│   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
+│   │   └── budget-service.md             validation, error format, examples
 │   ├── requirements.md          business problem, user stories, decomposition
 │   ├── architecture.drawio      diagram source
 │   └── architecture.png
 ├── scripts/
-│   └── init-databases.sh        creates the additional databases in PostgreSQL
+│   ├── init-databases.sh        creates the additional databases in PostgreSQL
+│   └── dev-token.sh             issues a development JWT for manual API calls
 ├── services/
 │   ├── profile-service/
 │   ├── budget-service/

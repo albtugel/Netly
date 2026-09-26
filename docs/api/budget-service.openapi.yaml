@@ -1,0 +1,628 @@
+openapi: 3.1.0
+info:
+  title: Netly Budget Service API
+  version: 1.0.0
+  description: |
+    CRUD API for subscriptions, debts and savings goals.
+
+    * Every `/api/v1` route requires a bearer JWT (HS256) issued by Profile Service. The `sub` claim is the user id.
+    * Records are scoped to the token's user. Another user's record answers `404`, the same as a missing one.
+    * Money is a JSON number with at most two decimal places. Dates are `YYYY-MM-DD`; timestamps are ISO 8601 UTC.
+    * Every error is `application/problem+json` (RFC 9457) with a machine-readable `code` and, on validation errors, an `errors` array.
+    * `PATCH` merges the given fields into the stored record and re-validates the result. Absent or `null` fields keep their value.
+servers:
+  - url: http://localhost:8082
+    description: docker compose
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Subscriptions
+    description: Recurring payments with a billing cycle; exposes their monthly cost.
+  - name: Debts
+    description: Amounts owed by a due date; exposes the monthly payment needed to repay on time.
+  - name: Goals
+    description: Savings goals with a target amount, date and priority.
+  - name: Health
+    description: Liveness probe.
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Service health check
+      security: []
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, const: ok }
+                  service: { type: string, const: netly-budget }
+              example: { status: ok, service: netly-budget }
+
+  /api/v1/subscriptions:
+    post:
+      tags: [Subscriptions]
+      summary: Create a subscription
+      operationId: createSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubscriptionCreate" }
+            example: { name: Netflix, price: 119.88, billingCycle: yearly, nextChargeDate: "2026-10-15" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Subscription" }
+              examples:
+                netflix: { $ref: "#/components/examples/Subscription" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    get:
+      tags: [Subscriptions]
+      summary: List subscriptions
+      operationId: listSubscriptions
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of subscriptions, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Subscription" }
+              example:
+                items:
+                  - id: 0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21
+                    name: Netflix
+                    price: 119.88
+                    billingCycle: yearly
+                    nextChargeDate: "2026-10-15"
+                    monthlyCost: 9.99
+                    createdAt: "2026-09-26T10:00:00Z"
+                    updatedAt: "2026-09-26T10:00:00Z"
+                limit: 50
+                offset: 0
+                total: 1
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/subscriptions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Subscriptions]
+      summary: Get a subscription
+      operationId: getSubscription
+      responses:
+        "200":
+          description: The subscription
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Subscription" }
+              examples:
+                netflix: { $ref: "#/components/examples/Subscription" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    patch:
+      tags: [Subscriptions]
+      summary: Update a subscription partially
+      operationId: updateSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubscriptionUpdate" }
+            example: { price: 12.99, billingCycle: monthly }
+      responses:
+        "200":
+          description: The updated subscription
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Subscription" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Subscriptions]
+      summary: Delete a subscription
+      operationId: deleteSubscription
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/debts:
+    post:
+      tags: [Debts]
+      summary: Create a debt
+      operationId: createDebt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DebtCreate" }
+            example: { creditor: Kaspi Bank, amount: 1200, dueDate: "2027-03-26" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Debt" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    get:
+      tags: [Debts]
+      summary: List debts
+      operationId: listDebts
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of debts, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Debt" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/debts/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Debts]
+      summary: Get a debt
+      operationId: getDebt
+      responses:
+        "200":
+          description: The debt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Debt" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    patch:
+      tags: [Debts]
+      summary: Update a debt partially
+      operationId: updateDebt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DebtUpdate" }
+            example: { amount: 900 }
+      responses:
+        "200":
+          description: The updated debt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Debt" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Debts]
+      summary: Delete a debt
+      operationId: deleteDebt
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/goals:
+    post:
+      tags: [Goals]
+      summary: Create a savings goal
+      operationId: createGoal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalCreate" }
+            example: { name: Laptop, targetAmount: 1500, savedAmount: 300, targetDate: "2027-09-26", priority: 8 }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { $ref: "#/components/headers/Location" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Goal" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    get:
+      tags: [Goals]
+      summary: List savings goals
+      operationId: listGoals
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of goals, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/Goal" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/goals/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    get:
+      tags: [Goals]
+      summary: Get a savings goal
+      operationId: getGoal
+      responses:
+        "200":
+          description: The goal
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Goal" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    patch:
+      tags: [Goals]
+      summary: Update a savings goal partially
+      operationId: updateGoal
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalUpdate" }
+            example: { savedAmount: 1500, status: completed }
+      responses:
+        "200":
+          description: The updated goal
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Goal" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    delete:
+      tags: [Goals]
+      summary: Delete a savings goal
+      operationId: deleteGoal
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 token with `sub` (user UUID) and `exp` claims, signed with the shared `JWT_SECRET`.
+
+  headers:
+    Location:
+      description: Path of the created record
+      schema: { type: string, example: /api/v1/subscriptions/0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21 }
+
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      description: Record id. A value that is not a UUID answers `422`.
+      schema: { type: string, format: uuid }
+    Limit:
+      name: limit
+      in: query
+      required: false
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      required: false
+      schema: { type: integer, minimum: 0, default: 0 }
+
+  schemas:
+    Money:
+      type: number
+      multipleOf: 0.01
+      description: Amount with at most two decimal places.
+    CalendarDate:
+      type: string
+      format: date
+      pattern: "^\\d{4}-\\d{2}-\\d{2}$"
+      example: "2026-10-15"
+    Name:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Trimmed of surrounding whitespace; must not be blank.
+    RecordMeta:
+      type: object
+      required: [id, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        createdAt: { type: string, format: date-time, readOnly: true }
+        updatedAt: { type: string, format: date-time, readOnly: true }
+    PageMeta:
+      type: object
+      required: [limit, offset, total]
+      properties:
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer, description: Number of the user's records before paging }
+
+    BillingCycle:
+      type: string
+      enum: [weekly, monthly, quarterly, yearly]
+    SubscriptionCreate:
+      type: object
+      required: [name, price, billingCycle, nextChargeDate]
+      properties:
+        name: { $ref: "#/components/schemas/Name" }
+        price:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 1000000
+        billingCycle: { $ref: "#/components/schemas/BillingCycle" }
+        nextChargeDate: { $ref: "#/components/schemas/CalendarDate" }
+    SubscriptionUpdate:
+      type: object
+      properties:
+        name: { $ref: "#/components/schemas/Name" }
+        price:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 1000000
+        billingCycle: { $ref: "#/components/schemas/BillingCycle" }
+        nextChargeDate: { $ref: "#/components/schemas/CalendarDate" }
+    Subscription:
+      allOf:
+        - $ref: "#/components/schemas/RecordMeta"
+        - $ref: "#/components/schemas/SubscriptionCreate"
+        - type: object
+          required: [monthlyCost]
+          properties:
+            monthlyCost:
+              allOf: [{ $ref: "#/components/schemas/Money" }]
+              readOnly: true
+              description: "price converted to a month: weekly × 52 / 12, quarterly / 3, yearly / 12"
+
+    DebtCreate:
+      type: object
+      required: [creditor, amount, dueDate]
+      properties:
+        creditor: { $ref: "#/components/schemas/Name" }
+        amount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 100000000
+        dueDate:
+          allOf: [{ $ref: "#/components/schemas/CalendarDate" }]
+          description: Must be after today (UTC) whenever it is set or changed.
+    DebtUpdate:
+      type: object
+      properties:
+        creditor: { $ref: "#/components/schemas/Name" }
+        amount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 100000000
+        dueDate: { $ref: "#/components/schemas/CalendarDate" }
+    Debt:
+      allOf:
+        - $ref: "#/components/schemas/RecordMeta"
+        - $ref: "#/components/schemas/DebtCreate"
+        - type: object
+          required: [monthlyPayment]
+          properties:
+            monthlyPayment:
+              allOf: [{ $ref: "#/components/schemas/Money" }]
+              readOnly: true
+              description: amount divided by the months left until dueDate (at least one), rounded up to the cent
+
+    GoalStatus:
+      type: string
+      enum: [active, completed, archived]
+    GoalCreate:
+      type: object
+      required: [name, targetAmount, targetDate, priority]
+      properties:
+        name: { $ref: "#/components/schemas/Name" }
+        targetAmount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 100000000
+        savedAmount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          minimum: 0
+          default: 0
+          description: Must not exceed targetAmount.
+        targetDate:
+          allOf: [{ $ref: "#/components/schemas/CalendarDate" }]
+          description: Must be after today (UTC) whenever it is set or changed.
+        priority:
+          type: integer
+          minimum: 1
+          maximum: 10
+          description: Higher is more important.
+        status:
+          allOf: [{ $ref: "#/components/schemas/GoalStatus" }]
+          default: active
+    GoalUpdate:
+      type: object
+      properties:
+        name: { $ref: "#/components/schemas/Name" }
+        targetAmount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 100000000
+        savedAmount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          minimum: 0
+        targetDate: { $ref: "#/components/schemas/CalendarDate" }
+        priority: { type: integer, minimum: 1, maximum: 10 }
+        status: { $ref: "#/components/schemas/GoalStatus" }
+    Goal:
+      allOf:
+        - $ref: "#/components/schemas/RecordMeta"
+        - $ref: "#/components/schemas/GoalCreate"
+        - type: object
+          required: [savedAmount, status, requiredMonthlyContribution]
+          properties:
+            requiredMonthlyContribution:
+              allOf: [{ $ref: "#/components/schemas/Money" }]
+              readOnly: true
+              description: (targetAmount − savedAmount) over the months left until targetDate; 0 when reached or not active
+
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field: { type: string, description: "JSON field, query parameter or path parameter name", example: price }
+        code:
+          type: string
+          enum:
+            - required
+            - invalid_type
+            - invalid_value
+            - blank
+            - too_long
+            - must_be_positive
+            - must_not_be_negative
+            - too_large
+            - too_precise
+            - out_of_range
+            - must_be_in_future
+            - exceeds_target
+        message: { type: string, example: Must be greater than 0 }
+    Problem:
+      type: object
+      description: RFC 9457 problem document with `code` and `errors` extensions.
+      required: [type, title, status, code, detail, instance]
+      properties:
+        type: { type: string, const: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          enum: [malformed_json, unauthorized, not_found, validation_failed, internal_error]
+        detail: { type: string }
+        instance: { type: string, description: Request path }
+        errors:
+          type: array
+          description: Present only for `validation_failed`; lists every invalid field.
+          items: { $ref: "#/components/schemas/FieldError" }
+
+  examples:
+    Subscription:
+      value:
+        id: 0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21
+        name: Netflix
+        price: 119.88
+        billingCycle: yearly
+        nextChargeDate: "2026-10-15"
+        monthlyCost: 9.99
+        createdAt: "2026-09-26T10:00:00Z"
+        updatedAt: "2026-09-26T10:00:00Z"
+
+  responses:
+    MalformedJSON:
+      description: The body is not valid JSON
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Malformed JSON
+            status: 400
+            code: malformed_json
+            detail: Request body is not valid JSON
+            instance: /api/v1/subscriptions
+    Unauthorized:
+      description: Missing, invalid or expired bearer token
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            code: unauthorized
+            detail: Missing bearer token
+            instance: /api/v1/subscriptions
+    NotFound:
+      description: No such record for this user
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Not found
+            status: 404
+            code: not_found
+            detail: Subscription 0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21 was not found
+            instance: /api/v1/subscriptions/0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21
+    ValidationFailed:
+      description: A field is missing, has the wrong type or breaks a rule
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Validation failed
+            status: 422
+            code: validation_failed
+            detail: 2 fields are invalid
+            instance: /api/v1/subscriptions
+            errors:
+              - { field: name, code: blank, message: Must not be blank }
+              - { field: price, code: must_be_positive, message: Must be greater than 0 }

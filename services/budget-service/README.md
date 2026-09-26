@@ -61,6 +61,8 @@ Every error is returned as `application/problem+json` (RFC 9457) with two extens
 
 ## Endpoints
 
+Full contract: [`docs/api/budget-service.openapi.yaml`](../../docs/api/budget-service.openapi.yaml). Rules and examples for every operation: [`docs/api/budget-service.md`](../../docs/api/budget-service.md). For a development token, run `scripts/dev-token.sh` from the repository root.
+
 All `/api/v1` routes require `Authorization: Bearer <jwt>` and only see the caller's own records; another user's record answers `404`.
 
 | Method | Path                       | Description                                       |
