@@ -4,6 +4,11 @@ import Foundation
 struct Validator {
     private(set) var errors: [FieldError] = []
 
+    /// Whether `field` already has a violation; cross-field rules skip fields that are invalid on their own.
+    func hasError(for field: String) -> Bool {
+        errors.contains { $0.field == field }
+    }
+
     mutating func add(field: String, code: String, message: String) {
         errors.append(FieldError(field: field, code: code, message: message))
     }

@@ -15,7 +15,7 @@ func buildApplication(configuration: AppConfiguration) async throws -> some Appl
     var logger = Logger(label: serviceName)
     logger.logLevel = .info
     if configuration.jwtSecret == AppConfiguration.developmentJWTSecret {
-        logger.warning("JWT_SECRET is not set, using the development secret")
+        logger.warning("JWT_SECRET is the public development secret; set a private one outside local development")
     }
 
     let keys = await JWTKeyCollection.hmac(secret: configuration.jwtSecret)

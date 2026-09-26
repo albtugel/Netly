@@ -48,6 +48,7 @@ private func probeApplication() async -> some ApplicationProtocol {
                 #expect(problem.status == 404)
                 #expect(problem.instance == "/nope")
                 #expect(problem.errors == nil)
+                #expect(String(buffer: response.body).contains(#""instance":"/nope""#))
             }
         }
     }

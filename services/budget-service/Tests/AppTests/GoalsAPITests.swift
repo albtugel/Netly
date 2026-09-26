@@ -35,6 +35,16 @@ import Testing
         }
     }
 
+    @Test func crossFieldRuleSkipsFieldsThatAreAlreadyInvalid() async throws {
+        let token = try await TestSupport.token()
+        let body = #"{"name": "Car", "targetAmount": 100, "savedAmount": 150.555, "targetDate": "2028-01-01", "priority": 5}"#
+        try await TestSupport.apiApplication().test(.router) { client in
+            let response = try await APIClient(client: client, token: token).send(.post, "/api/v1/goals", json: body)
+            let problem = try TestSupport.problem(from: response)
+            #expect(problem.errors == [FieldError(field: "savedAmount", code: "too_precise", message: "Must have at most 2 decimal places")])
+        }
+    }
+
     @Test func patchValidatesAgainstStoredValues() async throws {
         let token = try await TestSupport.token()
         try await TestSupport.apiApplication().test(.router) { client in

@@ -65,9 +65,7 @@ struct ProblemErrorMiddleware<Context: RequestContext>: RouterMiddleware {
             instance: path,
             errors: error.fieldErrors.isEmpty ? nil : error.fieldErrors
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        let body = try encoder.encode(problem)
+        let body = try JSONEncoder.budgetAPI.encode(problem)
         return Response(
             status: error.status,
             headers: [.contentType: "application/problem+json"],

@@ -85,7 +85,7 @@ struct GoalFields: ResourceFields {
         validator.text(name, field: "name")
         validator.money(targetAmount, field: "targetAmount", maximum: Self.maximumAmount)
         validator.money(savedAmount, field: "savedAmount", allowsZero: true, maximum: Self.maximumAmount)
-        if savedAmount >= 0, targetAmount > 0 {
+        if !validator.hasError(for: "savedAmount"), !validator.hasError(for: "targetAmount") {
             validator.check(
                 savedAmount <= targetAmount,
                 field: "savedAmount",
