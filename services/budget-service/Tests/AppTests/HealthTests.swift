@@ -7,7 +7,7 @@ import Testing
 
 @Suite struct HealthTests {
     @Test func healthReturnsOk() async throws {
-        let app = await buildApplication(
+        let app = try await buildApplication(
             configuration: AppConfiguration(hostname: "127.0.0.1", port: 0, jwtSecret: TestSupport.secret)
         )
 

@@ -14,6 +14,9 @@ swift run
 | -------- | --------- | ------------------ |
 | `PORT`   | `8082`    | HTTP port          |
 | `JWT_SECRET` | development secret | HS256 key shared with Profile Service, at least 32 bytes |
+| `DATABASE_URL` | — | `postgres://user:password@host:port/database`; add `?sslmode=require` for TLS. Without it data is kept in memory |
+
+On start-up the service creates its tables (`subscriptions`, `debts`, `goals`) if they do not exist. CHECK constraints in the schema repeat the API rules as a second line of defence.
 
 ## Test
 
@@ -21,6 +24,12 @@ swift run
 swift test
 # or, without a local Swift 6.2 toolchain:
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
+```
+
+Integration tests against a real PostgreSQL run only when `POSTGRES_TEST_URL` is set:
+
+```bash
+POSTGRES_TEST_URL=postgres://netly:netly@localhost:5432/netly_budget swift test
 ```
 
 ## Errors
@@ -72,8 +81,6 @@ All `/api/v1` routes require `Authorization: Bearer <jwt>` and only see the call
 | goal         | `name` 1–100 chars; `targetAmount` > 0; `savedAmount` 0..`targetAmount` (default 0); `targetDate` after today; `priority` 1–10; `status` `active` \| `completed` \| `archived` | `requiredMonthlyContribution` |
 
 Every resource also has read-only `id`, `createdAt` and `updatedAt`. Money has at most two decimal places; dates are `YYYY-MM-DD`. A "date after today" rule applies only when the client sets or changes that date, so an overdue debt can still be edited.
-
-Storage is in memory for now; PostgreSQL arrives in a later step.
 
 `GET /health` response:
 

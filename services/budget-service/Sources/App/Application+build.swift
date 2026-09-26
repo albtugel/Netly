@@ -2,6 +2,7 @@ import Foundation
 import Hummingbird
 import JWTKit
 import Logging
+import PostgresNIO
 
 let serviceName = "netly-budget"
 
@@ -10,7 +11,7 @@ struct HealthResponse: ResponseCodable {
     let service: String
 }
 
-func buildApplication(configuration: AppConfiguration) async -> some ApplicationProtocol {
+func buildApplication(configuration: AppConfiguration) async throws -> some ApplicationProtocol {
     var logger = Logger(label: serviceName)
     logger.logLevel = .info
     if configuration.jwtSecret == AppConfiguration.developmentJWTSecret {
@@ -18,16 +19,34 @@ func buildApplication(configuration: AppConfiguration) async -> some Application
     }
 
     let keys = await JWTKeyCollection.hmac(secret: configuration.jwtSecret)
-    let router = buildRouter(keys: keys, repositories: .inMemory())
 
-    return Application(
-        router: router,
+    let postgres: PostgresClient?
+    let repositories: Repositories
+    if let databaseURL = configuration.databaseURL {
+        let client = PostgresClient(configuration: try .init(databaseURL: databaseURL), backgroundLogger: logger)
+        postgres = client
+        repositories = .postgres(client: client, logger: logger)
+    } else {
+        logger.warning("DATABASE_URL is not set, data is kept in memory and lost on restart")
+        postgres = nil
+        repositories = .inMemory()
+    }
+
+    var app = Application(
+        router: buildRouter(keys: keys, repositories: repositories),
         configuration: .init(
             address: .hostname(configuration.hostname, port: configuration.port),
             serverName: serviceName
         ),
         logger: logger
     )
+    if let postgres {
+        app.addServices(postgres)
+        app.beforeServerStarts { [logger] in
+            try await Schema.migrate(client: postgres, logger: logger)
+        }
+    }
+    return app
 }
 
 func buildRouter(

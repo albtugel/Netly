@@ -1,4 +1,6 @@
 import Foundation
+import Logging
+import PostgresNIO
 
 /// Storage for every resource the service exposes.
 struct Repositories: Sendable {
@@ -11,6 +13,16 @@ struct Repositories: Sendable {
             subscriptions: InMemoryRecordRepository(clock: clock),
             debts: InMemoryRecordRepository(clock: clock),
             goals: InMemoryRecordRepository(clock: clock)
+        )
+    }
+}
+
+extension Repositories {
+    static func postgres(client: PostgresClient, logger: Logger) -> Repositories {
+        Repositories(
+            subscriptions: PostgresRecordRepository<SubscriptionFields>(client: client, logger: logger),
+            debts: PostgresRecordRepository<DebtFields>(client: client, logger: logger),
+            goals: PostgresRecordRepository<GoalFields>(client: client, logger: logger)
         )
     }
 }
