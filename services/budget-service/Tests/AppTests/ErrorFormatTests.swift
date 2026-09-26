@@ -18,7 +18,7 @@ private struct EchoRequest: Decodable {
 
 /// A router with the production middleware and two probe routes.
 private func probeApplication() async -> some ApplicationProtocol {
-    let router = buildRouter(keys: await TestSupport.keys())
+    let router = buildRouter(keys: await TestSupport.keys(), repositories: .inMemory())
     router.post("echo") { request, context -> HTTPResponse.Status in
         let input = try await request.decodeJSON(as: EchoRequest.self, context: context)
         var validator = Validator()

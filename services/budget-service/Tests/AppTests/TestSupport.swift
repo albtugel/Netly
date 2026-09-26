@@ -40,3 +40,37 @@ extension ByteBuffer {
         self.init(string: json)
     }
 }
+
+extension TestSupport {
+    /// 2026-09-26T10:00:00Z, so `today` is 2026-09-26 in every resource test.
+    static let now = Date(timeIntervalSince1970: 1_790_416_800)
+
+    static func apiApplication(repositories: Repositories? = nil) async -> some ApplicationProtocol {
+        let clock: @Sendable () -> Date = { now }
+        let router = buildRouter(
+            keys: await keys(),
+            repositories: repositories ?? .inMemory(clock: clock),
+            clock: clock
+        )
+        return Application(router: router)
+    }
+
+    static func decode<Value: Decodable>(_ type: Value.Type, from response: TestResponse) throws -> Value {
+        try JSONDecoder.budgetAPI.decode(Value.self, from: response.body)
+    }
+}
+
+/// Thin helper over `TestClientProtocol` for authenticated JSON calls.
+struct APIClient {
+    let client: any TestClientProtocol
+    let token: String
+
+    func send(_ method: HTTPRequest.Method, _ uri: String, json: String? = nil) async throws -> TestResponse {
+        try await client.execute(
+            uri: uri,
+            method: method,
+            headers: TestSupport.authHeaders(token),
+            body: json.map { ByteBuffer(json: $0) }
+        )
+    }
+}

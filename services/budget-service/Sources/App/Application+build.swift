@@ -1,3 +1,4 @@
+import Foundation
 import Hummingbird
 import JWTKit
 import Logging
@@ -17,7 +18,7 @@ func buildApplication(configuration: AppConfiguration) async -> some Application
     }
 
     let keys = await JWTKeyCollection.hmac(secret: configuration.jwtSecret)
-    let router = buildRouter(keys: keys)
+    let router = buildRouter(keys: keys, repositories: .inMemory())
 
     return Application(
         router: router,
@@ -29,13 +30,21 @@ func buildApplication(configuration: AppConfiguration) async -> some Application
     )
 }
 
-func buildRouter(keys: JWTKeyCollection) -> Router<BudgetRequestContext> {
+func buildRouter(
+    keys: JWTKeyCollection,
+    repositories: Repositories,
+    clock: @escaping @Sendable () -> Date = { Date() }
+) -> Router<BudgetRequestContext> {
     let router = Router(context: BudgetRequestContext.self)
     router.add(middleware: ProblemErrorMiddleware())
 
     router.get("health") { _, _ in
         HealthResponse(status: "ok", service: serviceName)
     }
+
+    let api = router.group("api/v1")
+        .add(middleware: JWTAuthenticator(keys: keys))
+    ResourceController(repository: repositories.subscriptions, clock: clock).addRoutes(to: api)
 
     return router
 }

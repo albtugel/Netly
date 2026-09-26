@@ -75,7 +75,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service and Budget Service both have an implemented skeleton with a `/health` endpoint, so the whole `docker compose` stack builds and starts. Spending Service is designed; its implementation is planned.
+Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions with a unified `application/problem+json` error format (see [`services/budget-service/README.md`](services/budget-service/README.md)). Spending Service is designed; its implementation is planned.
 
 Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker.
 

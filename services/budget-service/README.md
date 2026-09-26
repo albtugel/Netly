@@ -52,9 +52,20 @@ Every error is returned as `application/problem+json` (RFC 9457) with two extens
 
 ## Endpoints
 
-| Method | Path      | Description         |
-| ------ | --------- | ------------------- |
-| GET    | `/health` | Service health check |
+All `/api/v1` routes require `Authorization: Bearer <jwt>` and only see the caller's own records; another user's record answers `404`.
+
+| Method | Path                         | Description                                       |
+| ------ | ---------------------------- | ------------------------------------------------- |
+| GET    | `/health`                    | Service health check                              |
+| POST   | `/api/v1/subscriptions`      | Create; `201` with a `Location` header            |
+| GET    | `/api/v1/subscriptions`      | List, `?limit=1..100` (default 50) `&offset=0..`  |
+| GET    | `/api/v1/subscriptions/{id}` | Read one                                          |
+| PATCH  | `/api/v1/subscriptions/{id}` | Partial update; the merged record is re-validated |
+| DELETE | `/api/v1/subscriptions/{id}` | Delete; `204`                                     |
+
+A subscription has `name` (1–100 chars), `price` (> 0, ≤ 1 000 000, cents precision), `billingCycle` (`weekly`, `monthly`, `quarterly`, `yearly`) and `nextChargeDate` (`YYYY-MM-DD`). The read-only `monthlyCost` converts the price to a monthly equivalent.
+
+Storage is in memory for now; PostgreSQL arrives in a later step.
 
 Example response:
 
