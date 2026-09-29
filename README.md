@@ -77,7 +77,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, stored in PostgreSQL, with monthly equivalents computed on read and a unified `application/problem+json` error format. The API contract is [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
-Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker.
+Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker. The Swift 6.4 toolchain from the Xcode beta cannot build the `swift-collections` 1.7.0 dependency yet; use Docker with it.
 
 ### All services via Docker
 
@@ -110,6 +110,18 @@ Without a local Swift 6.2 toolchain, run the tests in the same image the Dockerf
 ```bash
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
+
+The suite has 42 tests covering CRUD for every resource, validation rules, the error format, JWT checks and the monthly calculations. The 3 PostgreSQL integration tests are skipped unless `POSTGRES_TEST_URL` is set, e.g. `POSTGRES_TEST_URL=postgres://netly:netly@postgres:5432/netly_budget swift test`.
+
+### API contract
+
+Check the OpenAPI contract with [Redocly CLI](https://redocly.com/docs/cli/):
+
+```bash
+npx @redocly/cli lint docs/api/budget-service.openapi.yaml
+```
+
+The contract is valid. The three remaining warnings are expected: no license, a `localhost` server URL, and no `4xx` response on `/health`.
 
 ### Calling the Budget API
 
