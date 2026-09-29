@@ -16,7 +16,7 @@ The business problem, user stories with acceptance criteria and the decompositio
 
 > The diagram currently shows Profile Service and Budget Service. `spending-service` is described below and will be added to the diagram along with its implementation.
 
-The client talks to all three services directly over HTTPS. Authentication is based on JWT: the token is issued by Profile Service, while Budget Service and Spending Service verify its signature with a shared secret. The databases live on the internal network and are not reachable from outside.
+The client talks to all three services directly over HTTPS. Authentication is based on JWT: the token is issued by Profile Service, while Budget Service and Spending Service verify its signature with a shared secret. The token is signed with HS256, carries the user id in `sub` and an expiry in `exp`; the shared `JWT_SECRET` must be at least 32 bytes long, and Budget Service refuses to start otherwise. The databases live on the internal network and are not reachable from outside.
 
 The system contains a single synchronous call, in one direction only: Budget Service asks Profile Service for the monthly income and mandatory expenses. There are no reverse calls and no cycles.
 
@@ -75,15 +75,17 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service has an implemented skeleton with a `/health` endpoint. Budget Service is designed but not yet implemented — `services/budget-service/` is still a placeholder, so the `budget` container declared in `docker-compose.yml` cannot be built yet. Spending Service is designed as well; its implementation is planned.
+Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, stored in PostgreSQL, with monthly equivalents computed on read and a unified `application/problem+json` error format. The API contract is [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
-Requires Swift 6.0 or newer, or Docker.
+Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker.
 
 ### All services via Docker
 
 ```bash
 docker compose up --build
 ```
+
+Set `JWT_SECRET` (at least 32 bytes) to override the development secret used by default.
 
 This brings up the `profile`, `budget` and `postgres` containers, with `postgres` hosting two databases (`netly_profile` and `netly_budget`).
 
@@ -92,8 +94,32 @@ Once Spending Service is implemented, a `spending` container and a `netly_spendi
 ### A single service
 
 ```bash
-cd services/profile-service
+cd services/profile-service   # or services/budget-service
 swift run
+```
+
+### Tests
+
+```bash
+cd services/budget-service
+swift test
+```
+
+Without a local Swift 6.2 toolchain, run the tests in the same image the Dockerfile uses:
+
+```bash
+docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
+```
+
+### Calling the Budget API
+
+Profile Service does not issue tokens yet, so mint a development JWT signed with the compose secret:
+
+```bash
+TOKEN=$(scripts/dev-token.sh)
+curl -X POST http://localhost:8082/api/v1/subscriptions \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Netflix", "price": 119.88, "billingCycle": "yearly", "nextChargeDate": "2026-10-15"}'
 ```
 
 ### Health check
@@ -114,11 +140,15 @@ Response:
 ```
 netly/
 ├── docs/
+│   ├── api/
+│   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
+│   │   └── budget-service.md             validation, error format, examples
 │   ├── requirements.md          business problem, user stories, decomposition
 │   ├── architecture.drawio      diagram source
 │   └── architecture.png
 ├── scripts/
-│   └── init-databases.sh        creates the additional databases in PostgreSQL
+│   ├── init-databases.sh        creates the additional databases in PostgreSQL
+│   └── dev-token.sh             issues a development JWT for manual API calls
 ├── services/
 │   ├── profile-service/
 │   ├── budget-service/
