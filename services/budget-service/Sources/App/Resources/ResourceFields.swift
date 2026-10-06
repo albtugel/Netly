@@ -23,6 +23,13 @@ protocol ResourceFields: Sendable, Equatable {
     func validate(into validator: inout Validator, previous: Self?, today: CalendarDate)
 
     static func response(for record: Record<Self>, today: CalendarDate) -> Response
+
+    /// Query parameters the list endpoint filters on. None by default.
+    static var listFilters: [ListFilter<Self>] { get }
+}
+
+extension ResourceFields {
+    static var listFilters: [ListFilter<Self>] { [] }
 }
 
 /// A stored resource: its fields plus server-owned metadata.

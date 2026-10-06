@@ -10,6 +10,12 @@ struct GoalFields: ResourceFields {
     static let resourceName = "Goal"
     static let maximumAmount: Decimal = 100_000_000
     static let priorities = 1...10
+    /// `GET /goals?status=active`, served by the `goals_user_status_idx` index.
+    static let listFilters = [
+        ListFilter<GoalFields>(name: "status", column: "status", allowedValues: GoalStatus.allCases.map(\.rawValue)) {
+            $0.status.rawValue
+        }
+    ]
 
     var name: String
     var targetAmount: Decimal

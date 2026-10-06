@@ -27,6 +27,10 @@ struct APIError: Error, Equatable, Sendable {
         APIError(status: .notFound, code: "not_found", title: "Not found", detail: detail)
     }
 
+    static func conflict(_ detail: String) -> APIError {
+        APIError(status: .conflict, code: "conflict", title: "Conflict", detail: detail)
+    }
+
     static func validationFailed(_ fieldErrors: [FieldError]) -> APIError {
         let noun = fieldErrors.count == 1 ? "field is" : "fields are"
         return APIError(

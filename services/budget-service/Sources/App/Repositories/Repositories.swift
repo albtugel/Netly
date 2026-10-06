@@ -20,9 +20,9 @@ struct Repositories: Sendable {
 extension Repositories {
     static func postgres(client: PostgresClient, logger: Logger) -> Repositories {
         Repositories(
-            subscriptions: PostgresRecordRepository<SubscriptionFields>(client: client, logger: logger),
-            debts: PostgresRecordRepository<DebtFields>(client: client, logger: logger),
-            goals: PostgresRecordRepository<GoalFields>(client: client, logger: logger)
+            subscriptions: SubscriptionRepository(client: client, logger: logger),
+            debts: DebtRepository(client: client, logger: logger),
+            goals: GoalRepository(client: client, logger: logger)
         )
     }
 }

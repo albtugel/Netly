@@ -25,7 +25,9 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         let today = CalendarDate(clock())
         try validate(fields, previous: nil, today: today)
 
-        let record = try await repository.create(fields, userID: userID)
+        let record = try await Self.rejectingDuplicates {
+            try await repository.create(fields, userID: userID)
+        }
         return EditedResponse(
             status: .created,
             headers: [.location: "/api/v1/\(Fields.collectionPath)/\(record.id.uuidString.lowercased())"],
@@ -35,8 +37,8 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
 
     @Sendable func list(_ request: Request, context: BudgetRequestContext) async throws -> Page<Fields.Response> {
         let userID = try context.requireIdentity().id
-        let (limit, offset) = try Self.pagination(from: request)
-        let (records, total) = try await repository.list(userID: userID, limit: limit, offset: offset)
+        let (filters, limit, offset) = try Self.listQuery(from: request)
+        let (records, total) = try await repository.list(userID: userID, filters: filters, limit: limit, offset: offset)
         let today = CalendarDate(clock())
         return Page(
             items: records.map { Fields.response(for: $0, today: today) },
@@ -67,7 +69,10 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         let today = CalendarDate(clock())
         try validate(fields, previous: existing.fields, today: today)
 
-        guard let record = try await repository.update(id: id, userID: userID, fields: fields) else {
+        let updated = try await Self.rejectingDuplicates {
+            try await repository.update(id: id, userID: userID, fields: fields)
+        }
+        guard let record = updated else {
             throw Self.notFound(id)
         }
         return Fields.response(for: record, today: today)
@@ -95,7 +100,7 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         return id
     }
 
-    private static func pagination(from request: Request) throws -> (limit: Int, offset: Int) {
+    private static func listQuery(from request: Request) throws -> (filters: [AppliedFilter<Fields>], limit: Int, offset: Int) {
         let query = request.uri.queryParameters
         var validator = Validator()
         let limit = integer(query.get("limit"), field: "limit", default: defaultPageSize, validator: &validator)
@@ -106,8 +111,18 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         if let offset {
             validator.check(offset >= 0, field: "offset", code: "out_of_range", message: "Must be greater than or equal to 0")
         }
+        let filters = Fields.listFilters.compactMap { filter -> AppliedFilter<Fields>? in
+            guard let value = query.get(filter.name) else { return nil }
+            validator.check(
+                filter.allowedValues.contains(value),
+                field: filter.name,
+                code: "invalid_value",
+                message: "Must be one of: \(filter.allowedValues.joined(separator: ", "))"
+            )
+            return AppliedFilter(filter: filter, value: value)
+        }
         try validator.throwIfInvalid()
-        return (limit ?? defaultPageSize, offset ?? 0)
+        return (filters, limit ?? defaultPageSize, offset ?? 0)
     }
 
     private static func integer(_ raw: String?, field: String, default defaultValue: Int, validator: inout Validator) -> Int? {
@@ -117,6 +132,14 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
             return nil
         }
         return value
+    }
+
+    private static func rejectingDuplicates<Value>(_ write: () async throws -> Value) async throws -> Value {
+        do {
+            return try await write()
+        } catch is DuplicateRecordError {
+            throw APIError.conflict("A \(Fields.resourceName.lowercased()) with the same name already exists")
+        }
     }
 
     private static func notFound(_ id: UUID) -> APIError {

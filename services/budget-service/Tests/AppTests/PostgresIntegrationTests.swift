@@ -138,4 +138,39 @@ struct PostgresIntegrationTests {
             #expect(completed.requiredMonthlyContribution == 0)
         }
     }
+
+    @Test func goalListFiltersByStatus() async throws {
+        let token = try await TestSupport.token()
+        try await withPostgresAPI { client in
+            let api = APIClient(client: client, token: token)
+            for (name, status) in [("Laptop", "active"), ("Bike", "completed"), ("Trip", "active")] {
+                let body = #"{"name": "\#(name)", "targetAmount": 1000, "targetDate": "2027-09-26", "priority": 5, "status": "\#(status)"}"#
+                #expect(try await api.send(.post, "/api/v1/goals", json: body).status == .created)
+            }
+            let page = try TestSupport.decode(Page<GoalFields.Response>.self, from: try await api.send(.get, "/api/v1/goals?status=active&limit=1&offset=1"))
+            #expect(page.total == 2)
+            #expect(page.items.map(\.name) == ["Trip"])
+        }
+    }
+
+    @Test func duplicateSubscriptionNameIsAConflict() async throws {
+        let token = try await TestSupport.token()
+        try await withPostgresAPI { client in
+            let api = APIClient(client: client, token: token)
+            let netflix = #"{"name": "Netflix", "price": 9.99, "billingCycle": "monthly", "nextChargeDate": "2026-10-01"}"#
+            #expect(try await api.send(.post, "/api/v1/subscriptions", json: netflix).status == .created)
+
+            let duplicate = try await api.send(.post, "/api/v1/subscriptions", json: netflix.replacingOccurrences(of: "Netflix", with: "netflix"))
+            #expect(duplicate.status == .conflict)
+            #expect(try TestSupport.problem(from: duplicate).code == "conflict")
+
+            let spotify = #"{"name": "Spotify", "price": 4.99, "billingCycle": "monthly", "nextChargeDate": "2026-10-01"}"#
+            let other = try TestSupport.decode(SubscriptionFields.Response.self, from: try await api.send(.post, "/api/v1/subscriptions", json: spotify))
+            let renamed = try await api.send(.patch, "/api/v1/subscriptions/\(other.id)", json: #"{"name": "NETFLIX"}"#)
+            #expect(renamed.status == .conflict)
+
+            let strangerAPI = APIClient(client: client, token: try await TestSupport.token())
+            #expect(try await strangerAPI.send(.post, "/api/v1/subscriptions", json: netflix).status == .created)
+        }
+    }
 }
