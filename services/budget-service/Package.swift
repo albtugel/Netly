@@ -8,7 +8,8 @@ let package = Package(
         .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.5.0"),
         .package(url: "https://github.com/hummingbird-project/hummingbird-auth.git", from: "2.0.0"),
         .package(url: "https://github.com/vapor/jwt-kit.git", from: "5.0.0"),
-        .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.21.0")
+        .package(url: "https://github.com/vapor/postgres-nio.git", from: "1.21.0"),
+        .package(url: "https://github.com/hummingbird-project/postgres-migrations.git", from: "1.2.0")
     ],
     targets: [
         .executableTarget(
@@ -17,7 +18,8 @@ let package = Package(
                 .product(name: "Hummingbird", package: "hummingbird"),
                 .product(name: "HummingbirdAuth", package: "hummingbird-auth"),
                 .product(name: "JWTKit", package: "jwt-kit"),
-                .product(name: "PostgresNIO", package: "postgres-nio")
+                .product(name: "PostgresNIO", package: "postgres-nio"),
+                .product(name: "PostgresMigrations", package: "postgres-migrations")
             ]
         ),
         .testTarget(

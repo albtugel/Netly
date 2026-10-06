@@ -7,10 +7,7 @@ import Testing
 
 @Suite struct HealthTests {
     @Test func healthReturnsOk() async throws {
-        let app = try await buildApplication(
-            configuration: AppConfiguration(hostname: "127.0.0.1", port: 0, jwtSecret: TestSupport.secret)
-        )
-
+        let app = Application(router: buildRouter(keys: await TestSupport.keys(), repositories: .inMemory()))
         try await app.test(.router) { client in
             try await client.execute(uri: "/health", method: .get) { response in
                 #expect(response.status == .ok)
@@ -25,12 +22,20 @@ import Testing
 @Suite struct AppConfigurationTests {
     @Test func rejectsShortJWTSecret() {
         #expect(throws: AppConfiguration.InvalidConfiguration.self) {
-            try AppConfiguration.fromEnvironment(["JWT_SECRET": "short"])
+            var environment = DatabaseConfigurationTests.composeEnvironment
+            environment["JWT_SECRET"] = "short"
+            try AppConfiguration.fromEnvironment(environment)
+        }
+    }
+
+    @Test func requiresDatabaseSettings() {
+        #expect(throws: AppConfiguration.InvalidConfiguration.self) {
+            try AppConfiguration.fromEnvironment([:])
         }
     }
 
     @Test func defaultsToDevelopmentSecretAndPort() throws {
-        let configuration = try AppConfiguration.fromEnvironment([:])
+        let configuration = try AppConfiguration.fromEnvironment(DatabaseConfigurationTests.composeEnvironment)
         #expect(configuration.port == 8082)
         #expect(configuration.jwtSecret == AppConfiguration.developmentJWTSecret)
     }

@@ -3,7 +3,7 @@ info:
   title: Netly Budget Service API
   version: 1.0.0
   description: |
-    CRUD API for subscriptions, debts and savings goals.
+    CRUD API for subscriptions, debts and savings goals, plus contributions that top up a goal.
 
     * Every `/api/v1` route requires a bearer JWT (HS256) issued by Profile Service. The `sub` claim is the user id.
     * Records are scoped to the token's user. Another user's record answers `404`, the same as a missing one.
@@ -23,6 +23,8 @@ tags:
     description: Amounts owed by a due date; exposes the monthly payment needed to repay on time.
   - name: Goals
     description: Savings goals with a target amount, date and priority.
+  - name: Goal contributions
+    description: Top-ups of a savings goal; each one raises the goal's savedAmount in the same transaction.
   - name: Health
     description: Liveness probe.
 
@@ -69,6 +71,7 @@ paths:
                 netflix: { $ref: "#/components/examples/Subscription" }
         "400": { $ref: "#/components/responses/MalformedJSON" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     get:
       tags: [Subscriptions]
@@ -144,6 +147,7 @@ paths:
         "400": { $ref: "#/components/responses/MalformedJSON" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
     delete:
       tags: [Subscriptions]
@@ -274,6 +278,7 @@ paths:
       summary: List savings goals
       operationId: listGoals
       parameters:
+        - $ref: "#/components/parameters/GoalStatusFilter"
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
       responses:
@@ -339,6 +344,76 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
+  /api/v1/goals/{id}/contributions:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+    post:
+      tags: [Goal contributions]
+      summary: Top up a savings goal
+      description: |
+        Records the contribution and adds its amount to the goal's `savedAmount` in one database transaction.
+        If the new `savedAmount` would exceed `targetAmount`, the transaction is rolled back, nothing is recorded,
+        and the answer is `422` with `exceeds_target` on `amount`.
+      operationId: createGoalContribution
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GoalContributionCreate" }
+            example: { amount: 200, note: September salary }
+      responses:
+        "201":
+          description: The contribution and the goal with its new savedAmount
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GoalContributionCreated" }
+              example:
+                contribution:
+                  id: 75ec6dac-f4dd-4bf5-b354-e36f5f2e4ee6
+                  goalId: d49927d5-e938-4d6f-97e8-0fea6388dc3e
+                  amount: 200
+                  note: September salary
+                  createdAt: "2026-10-06T20:45:22Z"
+                goal:
+                  id: d49927d5-e938-4d6f-97e8-0fea6388dc3e
+                  name: Laptop
+                  targetAmount: 1500
+                  savedAmount: 500
+                  targetDate: "2027-09-30"
+                  priority: 8
+                  status: active
+                  requiredMonthlyContribution: 83.34
+                  createdAt: "2026-10-06T20:45:22Z"
+                  updatedAt: "2026-10-06T20:45:22Z"
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+    get:
+      tags: [Goal contributions]
+      summary: List contributions of a savings goal
+      operationId: listGoalContributions
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: One page of the goal's contributions, oldest first
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PageMeta"
+                  - type: object
+                    required: [items]
+                    properties:
+                      items:
+                        type: array
+                        items: { $ref: "#/components/schemas/GoalContribution" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -369,6 +444,12 @@ components:
       in: query
       required: false
       schema: { type: integer, minimum: 0, default: 0 }
+    GoalStatusFilter:
+      name: status
+      in: query
+      required: false
+      description: Only goals with this status; served by the `goals_user_status_idx` index.
+      schema: { $ref: "#/components/schemas/GoalStatus" }
 
   schemas:
     Money:
@@ -523,6 +604,36 @@ components:
               readOnly: true
               description: (targetAmount − savedAmount) over the months left until targetDate; 0 when reached or not active
 
+    GoalContributionCreate:
+      type: object
+      required: [amount]
+      properties:
+        amount:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          exclusiveMinimum: 0
+          maximum: 100000000
+          description: savedAmount plus amount must not exceed the goal's targetAmount.
+        note:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Optional; trimmed of surrounding whitespace, must not be blank when present.
+    GoalContribution:
+      type: object
+      required: [id, goalId, amount, createdAt]
+      properties:
+        id: { type: string, format: uuid, readOnly: true }
+        goalId: { type: string, format: uuid, readOnly: true }
+        amount: { $ref: "#/components/schemas/Money" }
+        note: { type: string }
+        createdAt: { type: string, format: date-time, readOnly: true }
+    GoalContributionCreated:
+      type: object
+      required: [contribution, goal]
+      properties:
+        contribution: { $ref: "#/components/schemas/GoalContribution" }
+        goal: { $ref: "#/components/schemas/Goal" }
+
     FieldError:
       type: object
       required: [field, code, message]
@@ -554,7 +665,7 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [malformed_json, unauthorized, not_found, validation_failed, internal_error]
+          enum: [malformed_json, unauthorized, not_found, conflict, validation_failed, internal_error]
         detail: { type: string }
         instance: { type: string, description: Request path }
         errors:
@@ -611,6 +722,18 @@ components:
             code: not_found
             detail: Subscription 0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21 was not found
             instance: /api/v1/subscriptions/0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21
+    Conflict:
+      description: A record with the same unique key already exists, e.g. a subscription with the same name (case-insensitive)
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Conflict
+            status: 409
+            code: conflict
+            detail: A subscription with the same name already exists
+            instance: /api/v1/subscriptions
     ValidationFailed:
       description: A field is missing, has the wrong type or breaks a rule
       content:

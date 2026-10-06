@@ -75,4 +75,23 @@ import Testing
             #expect(empty.total == 0)
         }
     }
+
+    @Test func listFiltersByStatus() async throws {
+        let token = try await TestSupport.token()
+        try await TestSupport.apiApplication().test(.router) { client in
+            let api = APIClient(client: client, token: token)
+            let active = try TestSupport.decode(Goal.self, from: try await api.send(.post, "/api/v1/goals", json: laptop))
+            let archived = #"{"name": "Old", "targetAmount": 100, "targetDate": "2027-01-01", "priority": 1, "status": "archived"}"#
+            #expect(try await api.send(.post, "/api/v1/goals", json: archived).status == .created)
+
+            let page = try TestSupport.decode(Page<Goal>.self, from: try await api.send(.get, "/api/v1/goals?status=active"))
+            #expect(page.items.map(\.id) == [active.id])
+            #expect(page.total == 1)
+
+            let invalid = try await api.send(.get, "/api/v1/goals?status=done")
+            #expect(try TestSupport.problem(from: invalid).errors == [
+                FieldError(field: "status", code: "invalid_value", message: "Must be one of: active, completed, archived")
+            ])
+        }
+    }
 }

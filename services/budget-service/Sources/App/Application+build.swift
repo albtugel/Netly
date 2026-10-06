@@ -11,40 +11,34 @@ struct HealthResponse: ResponseCodable {
     let service: String
 }
 
-func buildApplication(configuration: AppConfiguration) async throws -> some ApplicationProtocol {
+func makeLogger() -> Logger {
     var logger = Logger(label: serviceName)
     logger.logLevel = .info
+    return logger
+}
+
+func buildApplication(configuration: AppConfiguration) async throws -> some ApplicationProtocol {
+    let logger = makeLogger()
     if configuration.jwtSecret == AppConfiguration.developmentJWTSecret {
         logger.warning("JWT_SECRET is the public development secret; set a private one outside local development")
     }
 
     let keys = await JWTKeyCollection.hmac(secret: configuration.jwtSecret)
 
-    let postgres: PostgresClient?
-    let repositories: Repositories
-    if let databaseURL = configuration.databaseURL {
-        let client = PostgresClient(configuration: try .init(databaseURL: databaseURL), backgroundLogger: logger)
-        postgres = client
-        repositories = .postgres(client: client, logger: logger)
-    } else {
-        logger.warning("DATABASE_URL is not set, data is kept in memory and lost on restart")
-        postgres = nil
-        repositories = .inMemory()
-    }
+    let postgres = PostgresClient(configuration: configuration.database, backgroundLogger: logger)
 
     var app = Application(
-        router: buildRouter(keys: keys, repositories: repositories),
+        router: buildRouter(keys: keys, repositories: .postgres(client: postgres, logger: logger)),
         configuration: .init(
             address: .hostname(configuration.hostname, port: configuration.port),
             serverName: serviceName
         ),
         logger: logger
     )
-    if let postgres {
-        app.addServices(postgres)
-        app.beforeServerStarts { [logger] in
-            try await Schema.migrate(client: postgres, logger: logger)
-        }
+    app.addServices(postgres)
+    app.beforeServerStarts { [logger] in
+        try await postgres.logConnection(to: configuration.database, logger: logger)
+        try await BudgetMigrations.verify(client: postgres, logger: logger)
     }
     return app
 }
@@ -66,6 +60,7 @@ func buildRouter(
     ResourceController(repository: repositories.subscriptions, clock: clock).addRoutes(to: api)
     ResourceController(repository: repositories.debts, clock: clock).addRoutes(to: api)
     ResourceController(repository: repositories.goals, clock: clock).addRoutes(to: api)
+    GoalContributionController(repository: repositories.goalContributions, clock: clock).addRoutes(to: api)
 
     return router
 }

@@ -28,30 +28,35 @@ struct PostgresRecordRepository<Fields: PostgresRecordMapping>: RecordRepository
     let client: PostgresClient
     let logger: Logger
 
-    private static var selectList: String {
+    static var selectList: String {
         (["id", "user_id", "created_at", "updated_at"] + Fields.columns.map(\.selectExpression)).joined(separator: ", ")
     }
 
-    func list(userID: UUID, limit: Int, offset: Int) async throws -> (records: [Record<Fields>], total: Int) {
+    func list(userID: UUID, filters: [AppliedFilter<Fields>], limit: Int, offset: Int) async throws -> (records: [Record<Fields>], total: Int) {
         var bindings = PostgresBindings()
         try bindings.append(userID)
-        try bindings.append(limit)
-        try bindings.append(offset)
-        let records = try await fetch(
-            "SELECT \(Self.selectList) FROM \(Fields.table) WHERE user_id = $1 ORDER BY created_at, id LIMIT $2 OFFSET $3",
-            bindings
-        )
+        var conditions = ["user_id = $1"]
+        for applied in filters {
+            try bindings.append(applied.value)
+            conditions.append("\(applied.filter.column) = $\(bindings.count)")
+        }
+        let whereClause = conditions.joined(separator: " AND ")
 
-        var countBindings = PostgresBindings()
-        try countBindings.append(userID)
         let rows = try await client.query(
-            PostgresQuery(unsafeSQL: "SELECT COUNT(*) FROM \(Fields.table) WHERE user_id = $1", binds: countBindings),
+            PostgresQuery(unsafeSQL: "SELECT COUNT(*) FROM \(Fields.table) WHERE \(whereClause)", binds: bindings),
             logger: logger
         )
         var total = 0
         for try await (count) in rows.decode(Int.self) {
             total = count
         }
+
+        try bindings.append(limit)
+        try bindings.append(offset)
+        let records = try await fetch(
+            "SELECT \(Self.selectList) FROM \(Fields.table) WHERE \(whereClause) ORDER BY created_at, id LIMIT $\(bindings.count - 1) OFFSET $\(bindings.count)",
+            bindings
+        )
         return (records, total)
     }
 
@@ -72,10 +77,12 @@ struct PostgresRecordRepository<Fields: PostgresRecordMapping>: RecordRepository
         try fields.bind(into: &bindings)
         let names = (["id", "user_id"] + Fields.columns.map(\.name)).joined(separator: ", ")
         let values = (["$1", "$2"] + Self.columnPlaceholders(startingAt: 3)).joined(separator: ", ")
-        let records = try await fetch(
-            "INSERT INTO \(Fields.table) (\(names)) VALUES (\(values)) RETURNING \(Self.selectList)",
-            bindings
-        )
+        let records = try await rejectingDuplicates {
+            try await fetch(
+                "INSERT INTO \(Fields.table) (\(names)) VALUES (\(values)) RETURNING \(Self.selectList)",
+                bindings
+            )
+        }
         guard let record = records.first else {
             throw PostgresRepositoryError.missingReturnedRow(table: Fields.table)
         }
@@ -90,10 +97,12 @@ struct PostgresRecordRepository<Fields: PostgresRecordMapping>: RecordRepository
         let assignments = zip(Fields.columns, Self.columnPlaceholders(startingAt: 3))
             .map { column, placeholder in "\(column.name) = \(placeholder)" }
             .joined(separator: ", ")
-        return try await fetch(
-            "UPDATE \(Fields.table) SET \(assignments), updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING \(Self.selectList)",
-            bindings
-        ).first
+        return try await rejectingDuplicates {
+            try await fetch(
+                "UPDATE \(Fields.table) SET \(assignments), updated_at = now() WHERE id = $1 AND user_id = $2 RETURNING \(Self.selectList)",
+                bindings
+            ).first
+        }
     }
 
     func delete(id: UUID, userID: UUID) async throws -> Bool {
@@ -118,18 +127,30 @@ struct PostgresRecordRepository<Fields: PostgresRecordMapping>: RecordRepository
         let rows = try await client.query(PostgresQuery(unsafeSQL: sql, binds: bindings), logger: logger)
         var records: [Record<Fields>] = []
         for try await row in rows {
-            let cells = row.makeRandomAccess()
-            records.append(
-                Record(
-                    id: try cells["id"].decode(UUID.self),
-                    userID: try cells["user_id"].decode(UUID.self),
-                    fields: try Fields(cells: cells),
-                    createdAt: try cells["created_at"].decode(Date.self),
-                    updatedAt: try cells["updated_at"].decode(Date.self)
-                )
-            )
+            records.append(try Record(cells: row.makeRandomAccess()))
         }
         return records
+    }
+
+    private func rejectingDuplicates<Value>(_ write: () async throws -> Value) async throws -> Value {
+        do {
+            return try await write()
+        } catch let error as PSQLError where error.serverInfo?[.sqlState] == PostgresError.Code.uniqueViolation.raw {
+            throw DuplicateRecordError()
+        }
+    }
+}
+
+extension Record where Fields: PostgresRecordMapping {
+    /// Decodes a row selected with `PostgresRecordRepository.selectList`.
+    init(cells: PostgresRandomAccessRow) throws {
+        self.init(
+            id: try cells["id"].decode(UUID.self),
+            userID: try cells["user_id"].decode(UUID.self),
+            fields: try Fields(cells: cells),
+            createdAt: try cells["created_at"].decode(Date.self),
+            updatedAt: try cells["updated_at"].decode(Date.self)
+        )
     }
 }
 

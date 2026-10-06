@@ -7,12 +7,15 @@ struct Repositories: Sendable {
     var subscriptions: any RecordRepository<SubscriptionFields>
     var debts: any RecordRepository<DebtFields>
     var goals: any RecordRepository<GoalFields>
+    var goalContributions: any GoalContributionRepository
 
     static func inMemory(clock: @escaping @Sendable () -> Date = { Date() }) -> Repositories {
-        Repositories(
+        let goals = InMemoryRecordRepository<GoalFields>(clock: clock)
+        return Repositories(
             subscriptions: InMemoryRecordRepository(clock: clock),
             debts: InMemoryRecordRepository(clock: clock),
-            goals: InMemoryRecordRepository(clock: clock)
+            goals: goals,
+            goalContributions: InMemoryGoalContributionRepository(goals: goals, clock: clock)
         )
     }
 }
@@ -20,9 +23,10 @@ struct Repositories: Sendable {
 extension Repositories {
     static func postgres(client: PostgresClient, logger: Logger) -> Repositories {
         Repositories(
-            subscriptions: PostgresRecordRepository<SubscriptionFields>(client: client, logger: logger),
-            debts: PostgresRecordRepository<DebtFields>(client: client, logger: logger),
-            goals: PostgresRecordRepository<GoalFields>(client: client, logger: logger)
+            subscriptions: SubscriptionRepository(client: client, logger: logger),
+            debts: DebtRepository(client: client, logger: logger),
+            goals: GoalRepository(client: client, logger: logger),
+            goalContributions: PostgresGoalContributionRepository(client: client, logger: logger)
         )
     }
 }

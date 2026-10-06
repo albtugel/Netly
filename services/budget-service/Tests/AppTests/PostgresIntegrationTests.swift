@@ -7,18 +7,24 @@ import Testing
 
 @testable import App
 
-private let postgresTestURL = ProcessInfo.processInfo.environment["POSTGRES_TEST_URL"]
+private let postgresTestConfiguration = try? PostgresClient.Configuration.fromEnvironment(ProcessInfo.processInfo.environment)
 
-/// Runs the HTTP API against a real database. Enabled only when `POSTGRES_TEST_URL` is set, e.g.
-/// `POSTGRES_TEST_URL=postgres://netly:netly@postgres:5432/netly_budget swift test`.
-@Suite(.enabled(if: postgresTestURL != nil), .serialized)
+/// Runs the HTTP API against a real database. Enabled only when the `DB_*` variables are set, e.g.
+/// `DB_HOST=localhost DB_NAME=netly_budget DB_USER=netly DB_PASSWORD=netly swift test`.
+@Suite(.enabled(if: postgresTestConfiguration != nil), .serialized)
 struct PostgresIntegrationTests {
-    private func withPostgresAPI(_ body: @escaping @Sendable (any TestClientProtocol) async throws -> Void) async throws {
+    /// A running client on a fully migrated database.
+    private func withMigratedClient(_ body: (PostgresClient, Logger) async throws -> Void) async throws {
         let logger = Logger(label: "postgres-tests")
-        let client = PostgresClient(configuration: try .init(databaseURL: postgresTestURL!), backgroundLogger: logger)
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { await client.run() }
-            try await Schema.migrate(client: client, logger: logger)
+        let client = PostgresClient(configuration: postgresTestConfiguration!, backgroundLogger: logger)
+        let running = Task { await client.run() }
+        defer { running.cancel() }
+        try await BudgetMigrations.apply(client: client, logger: logger)
+        try await body(client, logger)
+    }
+
+    private func withPostgresAPI(_ body: @escaping @Sendable (any TestClientProtocol) async throws -> Void) async throws {
+        try await withMigratedClient { client, logger in
             let router = buildRouter(
                 keys: await TestSupport.keys(),
                 repositories: .postgres(client: client, logger: logger),
@@ -27,7 +33,47 @@ struct PostgresIntegrationTests {
             try await Application(router: router).test(.router) { client in
                 try await body(client)
             }
-            group.cancelAll()
+        }
+    }
+
+    private func indexExists(_ name: String, client: PostgresClient) async throws -> Bool {
+        let rows = try await client.query("SELECT count(*) FROM pg_indexes WHERE indexname = \(name)")
+        for try await count in rows.decode(Int.self) {
+            return count == 1
+        }
+        return false
+    }
+
+    @Test func applicationConnectsOnStartUp() async throws {
+        try await withMigratedClient { _, _ in }
+        let app = try await buildApplication(
+            configuration: AppConfiguration(
+                hostname: "127.0.0.1",
+                port: 0,
+                jwtSecret: TestSupport.secret,
+                database: postgresTestConfiguration!
+            )
+        )
+        try await app.test(.router) { client in
+            let response = try await client.execute(uri: "/health", method: .get)
+            #expect(response.status == .ok)
+        }
+    }
+
+    @Test func rollbackRevertsOnlyTheNewestMigration() async throws {
+        try await withMigratedClient { client, logger in
+            let appliedIndex = try await indexExists("goals_user_status_idx", client: client)
+            #expect(appliedIndex)
+
+            try await BudgetMigrations.revertLatest(client: client, logger: logger)
+            let revertedIndex = try await indexExists("goals_user_status_idx", client: client)
+            let firstMigrationIndex = try await indexExists("goals_user_created_idx", client: client)
+            #expect(!revertedIndex)
+            #expect(firstMigrationIndex)
+
+            try await BudgetMigrations.apply(client: client, logger: logger)
+            let reappliedIndex = try await indexExists("goals_user_status_idx", client: client)
+            #expect(reappliedIndex)
         }
     }
 
@@ -90,6 +136,84 @@ struct PostgresIntegrationTests {
             #expect(completed.status == .completed)
             #expect(completed.priority == 8)
             #expect(completed.requiredMonthlyContribution == 0)
+        }
+    }
+
+    @Test func goalListFiltersByStatus() async throws {
+        let token = try await TestSupport.token()
+        try await withPostgresAPI { client in
+            let api = APIClient(client: client, token: token)
+            for (name, status) in [("Laptop", "active"), ("Bike", "completed"), ("Trip", "active")] {
+                let body = #"{"name": "\#(name)", "targetAmount": 1000, "targetDate": "2027-09-26", "priority": 5, "status": "\#(status)"}"#
+                #expect(try await api.send(.post, "/api/v1/goals", json: body).status == .created)
+            }
+            let page = try TestSupport.decode(Page<GoalFields.Response>.self, from: try await api.send(.get, "/api/v1/goals?status=active&limit=1&offset=1"))
+            #expect(page.total == 2)
+            #expect(page.items.map(\.name) == ["Trip"])
+        }
+    }
+
+    @Test func duplicateSubscriptionNameIsAConflict() async throws {
+        let token = try await TestSupport.token()
+        try await withPostgresAPI { client in
+            let api = APIClient(client: client, token: token)
+            let netflix = #"{"name": "Netflix", "price": 9.99, "billingCycle": "monthly", "nextChargeDate": "2026-10-01"}"#
+            #expect(try await api.send(.post, "/api/v1/subscriptions", json: netflix).status == .created)
+
+            let duplicate = try await api.send(.post, "/api/v1/subscriptions", json: netflix.replacingOccurrences(of: "Netflix", with: "netflix"))
+            #expect(duplicate.status == .conflict)
+            #expect(try TestSupport.problem(from: duplicate).code == "conflict")
+
+            let spotify = #"{"name": "Spotify", "price": 4.99, "billingCycle": "monthly", "nextChargeDate": "2026-10-01"}"#
+            let other = try TestSupport.decode(SubscriptionFields.Response.self, from: try await api.send(.post, "/api/v1/subscriptions", json: spotify))
+            let renamed = try await api.send(.patch, "/api/v1/subscriptions/\(other.id)", json: #"{"name": "NETFLIX"}"#)
+            #expect(renamed.status == .conflict)
+
+            let strangerAPI = APIClient(client: client, token: try await TestSupport.token())
+            #expect(try await strangerAPI.send(.post, "/api/v1/subscriptions", json: netflix).status == .created)
+        }
+    }
+
+    /// The transactional scenario: step 1 inserts the contribution, step 2 raises `goals.saved_amount`.
+    /// When step 2 breaks the target constraint, step 1 must be rolled back as well.
+    @Test func contributionPastTargetRollsBackBothSteps() async throws {
+        let token = try await TestSupport.token()
+        let goalBody = #"{"name": "Laptop", "targetAmount": 1500, "savedAmount": 300, "targetDate": "2027-09-26", "priority": 8}"#
+        try await withMigratedClient { postgres, logger in
+            let router = buildRouter(
+                keys: await TestSupport.keys(),
+                repositories: .postgres(client: postgres, logger: logger),
+                clock: { TestSupport.now }
+            )
+            try await Application(router: router).test(.router) { client in
+                let api = APIClient(client: client, token: token)
+                let goal = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.post, "/api/v1/goals", json: goalBody))
+
+                let accepted = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 200.5}"#)
+                #expect(accepted.status == .created)
+                #expect(try TestSupport.decode(GoalContribution.CreatedResponse.self, from: accepted).goal.savedAmount == Decimal(string: "500.5"))
+
+                let rejected = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 1000}"#)
+                #expect(try TestSupport.problem(from: rejected).errors?.map(\.code) == ["exceeds_target"])
+
+                let after = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.get, "/api/v1/goals/\(goal.id)"))
+                #expect(after.savedAmount == Decimal(string: "500.5"))
+
+                let rows = try await postgres.query(
+                    "SELECT count(*) FROM goal_contributions WHERE goal_id = \(UUID(uuidString: goal.id)!)"
+                )
+                for try await count in rows.decode(Int.self) {
+                    #expect(count == 1)
+                }
+
+                #expect(try await api.send(.delete, "/api/v1/goals/\(goal.id)").status == .noContent)
+                let orphans = try await postgres.query(
+                    "SELECT count(*) FROM goal_contributions WHERE goal_id = \(UUID(uuidString: goal.id)!)"
+                )
+                for try await count in orphans.decode(Int.self) {
+                    #expect(count == 0)
+                }
+            }
         }
     }
 }
