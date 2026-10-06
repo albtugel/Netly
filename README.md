@@ -65,7 +65,7 @@ Continuous GPS tracking is not used: the route is reconstructed from visits and 
 | ---------------- | -------------------------------------------- | -------- | ---------- |
 | Client           | SwiftUI, iOS 17+, MapKit, CoreLocation, App Intents | Swift | SwiftData  |
 | Profile Service  | Vapor, Fluent, JWT                           | Swift    | PostgreSQL |
-| Budget Service   | Hummingbird, PostgresNIO                     | Swift    | PostgreSQL |
+| Budget Service   | Hummingbird, PostgresNIO, postgres-migrations | Swift   | PostgreSQL |
 | Spending Service | Hummingbird, PostgresNIO                     | Swift    | PostgreSQL |
 | Runtime          | Docker, Docker Compose                       | —        | —          |
 
@@ -75,7 +75,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, stored in PostgreSQL, with monthly equivalents computed on read and a unified `application/problem+json` error format. The API contract is [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
+Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, and errors share one `application/problem+json` format. The API contract is [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
 Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker. The Swift 6.4 toolchain from the Xcode beta cannot build the `swift-collections` 1.7.0 dependency yet; use Docker with it.
 
@@ -85,17 +85,30 @@ Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which need
 docker compose up --build
 ```
 
-Set `JWT_SECRET` (at least 32 bytes) to override the development secret used by default.
+Set `JWT_SECRET` (at least 32 bytes) to override the development secret used by default. Every setting is listed in [`.env.example`](.env.example); copy it to `.env` to change them, and docker compose picks the file up.
 
-This brings up the `profile`, `budget` and `postgres` containers, with `postgres` hosting two databases (`netly_profile` and `netly_budget`).
+This brings up the `profile`, `budget` and `postgres` containers, with `postgres` hosting two databases (`netly_profile` and `netly_budget`). Before `budget` starts, the one-shot `budget-migrate` container applies pending database migrations.
+
+A `pgdata` volume created before migrations were introduced already holds tables without a migration history; reset it once with `docker compose down -v`.
 
 Once Spending Service is implemented, a `spending` container and a `netly_spending` database in the same PostgreSQL instance will be added.
 
 ### A single service
 
 ```bash
-cd services/profile-service   # or services/budget-service
+cd services/profile-service
 swift run
+```
+
+Budget Service needs PostgreSQL, configured only through the `DB_*` environment variables:
+
+```bash
+docker compose up -d postgres
+cp .env.example .env                  # once
+cd services/budget-service
+set -a && . ../../.env && set +a
+swift run App migrate                 # creates or updates the schema
+swift run App                         # serves on :8082; logs the database it connected to
 ```
 
 ### Tests
@@ -111,7 +124,14 @@ Without a local Swift 6.2 toolchain, run the tests in the same image the Dockerf
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
 
-The suite has 42 tests covering CRUD for every resource, validation rules, the error format, JWT checks and the monthly calculations. The 3 PostgreSQL integration tests are skipped unless `POSTGRES_TEST_URL` is set, e.g. `POSTGRES_TEST_URL=postgres://netly:netly@postgres:5432/netly_budget swift test`.
+The suite has 55 tests covering CRUD for every resource, the status filter, goal contributions, validation rules, the error format, JWT checks, configuration and the monthly calculations. The 8 PostgreSQL integration tests (start-up connection, migration rollback, unique names, the contribution transaction and its rollback) are skipped unless the `DB_*` variables are set. To run them against the compose database:
+
+```bash
+docker compose up -d postgres
+docker run --rm --network netly_default -v "$PWD":/src -w /src \
+  -e DB_HOST=postgres -e DB_NAME=netly_budget -e DB_USER=netly -e DB_PASSWORD=netly \
+  swift:6.2-noble swift test
+```
 
 ### API contract
 
@@ -123,6 +143,24 @@ npx @redocly/cli lint docs/api/budget-service.openapi.yaml
 
 The contract is valid. The three remaining warnings are expected: no license, a `localhost` server URL, and no `4xx` response on `/health`.
 
+### Database
+
+Budget Service keeps its data in the `netly_budget` PostgreSQL database: `subscriptions`, `debts`, `goals` and `goal_contributions`, with `goals` 1:N `goal_contributions`.
+
+![ER diagram](docs/er-diagram.png)
+
+- [`docs/database.md`](docs/database.md): the ER diagram, every table and constraint, the index rationale, the migrations and the transactional scenario.
+- [`docs/verification.md`](docs/verification.md): real requests and responses against PostgreSQL, the migration rollback, the rolled-back transaction in the PostgreSQL log, and identical data after the containers are recreated.
+
+The schema is created only by migrations:
+
+```bash
+docker compose run --rm budget-migrate     # apply pending migrations
+docker compose run --rm budget rollback    # revert the newest migration
+```
+
+The server refuses to start while the schema is behind the code.
+
 ### Calling the Budget API
 
 Profile Service does not issue tokens yet, so mint a development JWT signed with the compose secret:
@@ -132,6 +170,11 @@ TOKEN=$(scripts/dev-token.sh)
 curl -X POST http://localhost:8082/api/v1/subscriptions \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"name": "Netflix", "price": 119.88, "billingCycle": "yearly", "nextChargeDate": "2026-10-15"}'
+
+curl "http://localhost:8082/api/v1/goals?status=active" -H "Authorization: Bearer $TOKEN"
+curl -X POST http://localhost:8082/api/v1/goals/<goal-id>/contributions \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"amount": 200, "note": "September salary"}'
 ```
 
 ### Health check
@@ -156,6 +199,9 @@ netly/
 │   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
 │   │   └── budget-service.md             validation, error format, examples
 │   ├── requirements.md          business problem, user stories, decomposition
+│   ├── database.md              Budget Service schema, constraints, indexes, migrations
+│   ├── er-diagram.png           ER diagram of netly_budget
+│   ├── verification.md          API checked against PostgreSQL and across restarts
 │   ├── architecture.drawio      diagram source
 │   └── architecture.png
 ├── scripts/
@@ -165,6 +211,7 @@ netly/
 │   ├── profile-service/
 │   ├── budget-service/
 │   └── spending-service/        (planned)
+├── .env.example                 every environment variable with local defaults
 ├── docker-compose.yml
 └── README.md
 ```

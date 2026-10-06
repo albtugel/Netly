@@ -1,6 +1,6 @@
 # netly-budget
 
-Responsibility: subscriptions, debts, savings goals, free-balance calculation.
+Responsibility: subscriptions, debts, savings goals and their contributions, free-balance calculation.
 
 Framework: Hummingbird 2. Default port: 8082.
 
@@ -81,6 +81,7 @@ Every error is returned as `application/problem+json` (RFC 9457) with two extens
 | 400    | `malformed_json`    | The body is not valid JSON                                  |
 | 401    | `unauthorized`      | Missing, malformed, foreign-signed or expired bearer token  |
 | 404    | `not_found`         | Unknown route, or a record that does not exist for the user |
+| 409    | `conflict`          | A subscription with the same name (case-insensitive) exists |
 | 422    | `validation_failed` | A field is missing, has the wrong type or breaks a rule     |
 | 500    | `internal_error`    | Unexpected failure; details are logged, not returned        |
 
@@ -98,14 +99,17 @@ All `/api/v1` routes require `Authorization: Bearer <jwt>` and only see the call
 | GET    | `/api/v1/{resource}/{id}`  | Read one                                          |
 | PATCH  | `/api/v1/{resource}/{id}`  | Partial update; the merged record is re-validated |
 | DELETE | `/api/v1/{resource}/{id}`  | Delete; `204`                                     |
+| POST   | `/api/v1/goals/{id}/contributions` | Top up a goal: records the contribution and raises `savedAmount` in one transaction; `201` |
+| GET    | `/api/v1/goals/{id}/contributions` | The goal's contributions, oldest first, paged like any list |
 
-`{resource}` is `subscriptions`, `debts` or `goals`.
+`{resource}` is `subscriptions`, `debts` or `goals`. `GET /api/v1/goals` also accepts `?status=active|completed|archived`.
 
 | Resource     | Fields                                                                                                                                                              | Read-only                     |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | subscription | `name` 1–100 chars; `price` > 0, ≤ 1 000 000; `billingCycle` `weekly` \| `monthly` \| `quarterly` \| `yearly`; `nextChargeDate`                                     | `monthlyCost`                 |
 | debt         | `creditor` 1–100 chars; `amount` > 0, ≤ 100 000 000; `dueDate` after today                                                                                         | `monthlyPayment`              |
 | goal         | `name` 1–100 chars; `targetAmount` > 0; `savedAmount` 0..`targetAmount` (default 0); `targetDate` after today; `priority` 1–10; `status` `active` \| `completed` \| `archived` | `requiredMonthlyContribution` |
+| contribution | `amount` > 0, `savedAmount + amount` ≤ `targetAmount`; `note` optional, 1–200 chars | `goalId`, no `updatedAt` |
 
 Every resource also has read-only `id`, `createdAt` and `updatedAt`. Money has at most two decimal places; dates are `YYYY-MM-DD`. A "date after today" rule applies only when the client sets or changes that date, so an overdue debt can still be edited.
 

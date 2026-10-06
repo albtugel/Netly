@@ -1,6 +1,6 @@
 # Проверка Budget Service поверх PostgreSQL
 
-Все запросы ниже выполнены 2026-10-07 против сервиса, запущенного в docker compose, с настоящей базой `netly_budget`. Ответы не редактировались: это фактический вывод `curl` и `psql`, отформатированный `jq`. Токен — development JWT пользователя `3f2a8c1e-7b4d-4e9a-b5c6-1d2e3f4a5b6c`:
+Все запросы ниже выполнены 2026-10-07 (UTC+5; логи и `createdAt` записаны в UTC, поэтому в них 2026-10-06) против сервиса, запущенного в docker compose, с настоящей базой `netly_budget`. Ответы не редактировались: это фактический вывод `curl` и `psql`, отформатированный `jq`. Токен — development JWT пользователя `3f2a8c1e-7b4d-4e9a-b5c6-1d2e3f4a5b6c`:
 
 ```bash
 TOKEN=$(scripts/dev-token.sh 3f2a8c1e-7b4d-4e9a-b5c6-1d2e3f4a5b6c)

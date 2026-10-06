@@ -2,7 +2,7 @@
 
 The machine-readable contract is [`budget-service.openapi.yaml`](budget-service.openapi.yaml) (OpenAPI 3.1). This page describes the same API for people: conventions, validation rules, the error format, and a request/response example for every operation.
 
-All examples below are real responses from the service running against PostgreSQL, taken on 2026-09-26. Only the `Date`, `Server` and `Content-Length` headers are left out.
+All examples below are real responses from the service running against PostgreSQL, taken on 2026-09-26; the goal contributions, the status filter and the `409` example were taken on 2026-10-07 during the run recorded in [`../verification.md`](../verification.md). Only the `Date`, `Server` and `Content-Length` headers are left out.
 
 ## Conventions
 
@@ -73,12 +73,25 @@ Because the date rule applies only when the date changes, an overdue debt can st
 
 `exceeds_target` compares two fields. It is skipped when either amount is already invalid on its own, so a field never gets two errors at once.
 
+### Goal contribution — `/api/v1/goals/{id}/contributions`
+
+A top-up of a goal. Recording one adds its `amount` to the goal's `savedAmount` in the same database transaction, so the history and the total never disagree. Contributions are an append-only history: there is no update or delete.
+
+| Field       | Type   | Required on create | Rule                                                              | Error codes                                                     |
+| ----------- | ------ | ------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------- |
+| `amount`    | money  | yes                | `> 0`, `≤ 100 000 000`, at most 2 decimals; `savedAmount + amount ≤ targetAmount` | `must_be_positive`, `too_large`, `too_precise`, `exceeds_target` |
+| `note`      | string | no                 | 1–200 characters after trimming                                   | `blank`, `too_long`                                             |
+| `goalId`    | uuid   | read-only          | the goal from the path                                            | —                                                               |
+
+`exceeds_target` on `amount` is checked by the database (`CHECK goals_saved_within_target`) inside the transaction, not by reading the goal first, so two concurrent contributions cannot together pass the target. When it fires, the already inserted contribution is rolled back too.
+
 ### Query and path parameters
 
 | Parameter | Rule                  | Error codes                     |
 | --------- | --------------------- | ------------------------------- |
 | `limit`   | integer 1–100         | `invalid_type`, `out_of_range`  |
 | `offset`  | integer ≥ 0           | `invalid_type`, `out_of_range`  |
+| `status`  | `GET /goals` only: `active`, `completed` or `archived` | `invalid_value` |
 | `{id}`    | UUID                  | `invalid_value`                 |
 
 ## Error format
@@ -110,6 +123,7 @@ Every error, including an unknown route, is `application/problem+json` as define
 | 400    | `malformed_json`    | The body is not parseable JSON                                                        |
 | 401    | `unauthorized`      | Missing token, wrong signature, expired token, or `sub` that is not a UUID            |
 | 404    | `not_found`         | No such route, or no such record for this user                                        |
+| 409    | `conflict`          | A subscription with the same name (case-insensitive) already exists for this user     |
 | 422    | `validation_failed` | Missing field, wrong JSON type, unknown enum value, invalid date, or a broken rule    |
 | 500    | `internal_error`    | Anything unexpected; the cause is logged, the response says only "An unexpected error occurred" |
 
@@ -128,7 +142,7 @@ Field-level codes:
 | `too_precise`          | More than 2 decimal places                           |
 | `out_of_range`         | Integer outside its allowed range                    |
 | `must_be_in_future`    | Date is today or earlier                             |
-| `exceeds_target`       | `savedAmount` is greater than `targetAmount`         |
+| `exceeds_target`       | `savedAmount`, or `savedAmount` plus a contribution, is greater than `targetAmount` |
 
 ## Operations
 
@@ -420,6 +434,14 @@ Content-Type: application/json; charset=utf-8
 }
 ```
 
+Filter by status with `?status=`; the `goals_user_status_idx` index serves this query:
+
+```bash
+curl "$BASE/api/v1/goals?status=active" -H "Authorization: Bearer $TOKEN"
+```
+
+An archived goal created next to the active one is left out of the page and of `total`. The full request and response are in [`verification.md`](../verification.md#цели-и-фильтр-по-статусу).
+
 #### Get a goal
 
 ```bash
@@ -482,6 +504,90 @@ curl -X DELETE $BASE/api/v1/goals/b69f8093-53a5-40b3-ade5-bf9564799bff -H "Autho
 HTTP/1.1 204 No Content
 ```
 
+### Goal contributions
+
+#### Top up a goal
+
+```bash
+curl -X POST $BASE/api/v1/goals/ab9822c4-57d3-4be9-95a9-4235e2f3d135/contributions \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"amount": 200, "note": "September salary"}'
+```
+
+```http
+HTTP/1.1 201 Created
+Content-Type: application/json; charset=utf-8
+
+{
+  "contribution": {
+    "amount": 200,
+    "createdAt": "2026-10-06T20:45:54Z",
+    "goalId": "ab9822c4-57d3-4be9-95a9-4235e2f3d135",
+    "id": "829c6983-1811-44ba-8362-f938e7d55caf",
+    "note": "September salary"
+  },
+  "goal": {
+    "createdAt": "2026-10-06T20:45:54Z",
+    "id": "ab9822c4-57d3-4be9-95a9-4235e2f3d135",
+    "name": "Laptop",
+    "priority": 8,
+    "requiredMonthlyContribution": 83.34,
+    "savedAmount": 500,
+    "status": "active",
+    "targetAmount": 1500,
+    "targetDate": "2027-09-30",
+    "updatedAt": "2026-10-06T20:45:54Z"
+  }
+}
+```
+
+A contribution that would take `savedAmount` past `targetAmount` (here 500 + 1500 > 1500) is rolled back and answers:
+
+```http
+HTTP/1.1 422 Unprocessable Content
+Content-Type: application/problem+json
+
+{
+  "code": "validation_failed",
+  "detail": "1 field is invalid",
+  "errors": [
+    { "code": "exceeds_target", "field": "amount", "message": "savedAmount plus amount must not exceed the goal's targetAmount" }
+  ],
+  "instance": "/api/v1/goals/ab9822c4-57d3-4be9-95a9-4235e2f3d135/contributions",
+  "status": 422,
+  "title": "Validation failed",
+  "type": "about:blank"
+}
+```
+
+#### List contributions of a goal
+
+```bash
+curl $BASE/api/v1/goals/ab9822c4-57d3-4be9-95a9-4235e2f3d135/contributions -H "Authorization: Bearer $TOKEN"
+```
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json; charset=utf-8
+
+{
+  "items": [
+    {
+      "amount": 200,
+      "createdAt": "2026-10-06T20:45:54Z",
+      "goalId": "ab9822c4-57d3-4be9-95a9-4235e2f3d135",
+      "id": "829c6983-1811-44ba-8362-f938e7d55caf",
+      "note": "September salary"
+    }
+  ],
+  "limit": 50,
+  "offset": 0,
+  "total": 1
+}
+```
+
+Another user's goal, or a goal that does not exist, answers `404` on both routes.
+
 ## Error examples
 
 Every error response has `Content-Type: application/problem+json`.
@@ -537,6 +643,29 @@ A goal that exists but belongs to another user answers exactly like a missing on
 ```
 
 An unknown route, e.g. `GET /api/v1/unknown`, answers `404` with `"detail": "Route not found"`.
+
+### 409 — duplicate subscription name
+
+Names are unique per user regardless of case, because the same subscription entered twice would count twice in the monthly budget.
+
+```bash
+curl -X POST $BASE/api/v1/subscriptions -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "netflix", "price": 9.99, "billingCycle": "monthly", "nextChargeDate": "2026-10-20"}'
+```
+
+```http
+HTTP/1.1 409 Conflict
+Content-Type: application/problem+json
+
+{
+  "code": "conflict",
+  "detail": "A subscription with the same name already exists",
+  "instance": "/api/v1/subscriptions",
+  "status": 409,
+  "title": "Conflict",
+  "type": "about:blank"
+}
+```
 
 ### 422 — every broken rule at once
 
