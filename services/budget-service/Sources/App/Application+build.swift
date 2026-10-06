@@ -11,9 +11,14 @@ struct HealthResponse: ResponseCodable {
     let service: String
 }
 
-func buildApplication(configuration: AppConfiguration) async throws -> some ApplicationProtocol {
+func makeLogger() -> Logger {
     var logger = Logger(label: serviceName)
     logger.logLevel = .info
+    return logger
+}
+
+func buildApplication(configuration: AppConfiguration) async throws -> some ApplicationProtocol {
+    let logger = makeLogger()
     if configuration.jwtSecret == AppConfiguration.developmentJWTSecret {
         logger.warning("JWT_SECRET is the public development secret; set a private one outside local development")
     }
@@ -33,7 +38,7 @@ func buildApplication(configuration: AppConfiguration) async throws -> some Appl
     app.addServices(postgres)
     app.beforeServerStarts { [logger] in
         try await postgres.logConnection(to: configuration.database, logger: logger)
-        try await Schema.migrate(client: postgres, logger: logger)
+        try await BudgetMigrations.verify(client: postgres, logger: logger)
     }
     return app
 }

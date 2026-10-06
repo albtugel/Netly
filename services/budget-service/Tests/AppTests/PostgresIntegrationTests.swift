@@ -13,12 +13,18 @@ private let postgresTestConfiguration = try? PostgresClient.Configuration.fromEn
 /// `DB_HOST=localhost DB_NAME=netly_budget DB_USER=netly DB_PASSWORD=netly swift test`.
 @Suite(.enabled(if: postgresTestConfiguration != nil), .serialized)
 struct PostgresIntegrationTests {
-    private func withPostgresAPI(_ body: @escaping @Sendable (any TestClientProtocol) async throws -> Void) async throws {
+    /// A running client on a fully migrated database.
+    private func withMigratedClient(_ body: (PostgresClient, Logger) async throws -> Void) async throws {
         let logger = Logger(label: "postgres-tests")
         let client = PostgresClient(configuration: postgresTestConfiguration!, backgroundLogger: logger)
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { await client.run() }
-            try await Schema.migrate(client: client, logger: logger)
+        let running = Task { await client.run() }
+        defer { running.cancel() }
+        try await BudgetMigrations.apply(client: client, logger: logger)
+        try await body(client, logger)
+    }
+
+    private func withPostgresAPI(_ body: @escaping @Sendable (any TestClientProtocol) async throws -> Void) async throws {
+        try await withMigratedClient { client, logger in
             let router = buildRouter(
                 keys: await TestSupport.keys(),
                 repositories: .postgres(client: client, logger: logger),
@@ -27,11 +33,19 @@ struct PostgresIntegrationTests {
             try await Application(router: router).test(.router) { client in
                 try await body(client)
             }
-            group.cancelAll()
         }
     }
 
+    private func indexExists(_ name: String, client: PostgresClient) async throws -> Bool {
+        let rows = try await client.query("SELECT count(*) FROM pg_indexes WHERE indexname = \(name)")
+        for try await count in rows.decode(Int.self) {
+            return count == 1
+        }
+        return false
+    }
+
     @Test func applicationConnectsOnStartUp() async throws {
+        try await withMigratedClient { _, _ in }
         let app = try await buildApplication(
             configuration: AppConfiguration(
                 hostname: "127.0.0.1",
@@ -43,6 +57,23 @@ struct PostgresIntegrationTests {
         try await app.test(.router) { client in
             let response = try await client.execute(uri: "/health", method: .get)
             #expect(response.status == .ok)
+        }
+    }
+
+    @Test func rollbackRevertsOnlyTheNewestMigration() async throws {
+        try await withMigratedClient { client, logger in
+            let appliedIndex = try await indexExists("goals_user_status_idx", client: client)
+            #expect(appliedIndex)
+
+            try await BudgetMigrations.revertLatest(client: client, logger: logger)
+            let revertedIndex = try await indexExists("goals_user_status_idx", client: client)
+            let firstMigrationIndex = try await indexExists("goals_user_created_idx", client: client)
+            #expect(!revertedIndex)
+            #expect(firstMigrationIndex)
+
+            try await BudgetMigrations.apply(client: client, logger: logger)
+            let reappliedIndex = try await indexExists("goals_user_status_idx", client: client)
+            #expect(reappliedIndex)
         }
     }
 

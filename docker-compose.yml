@@ -26,21 +26,33 @@ services:
       postgres:
         condition: service_healthy
 
-  budget:
+  # One-shot: applies pending migrations, then exits. `budget` starts only after it succeeds.
+  budget-migrate:
     build: ./services/budget-service
-    environment:
+    image: netly-budget
+    command: ["migrate"]
+    environment: &budget-database
       DB_HOST: postgres
       DB_PORT: 5432
       DB_NAME: netly_budget
       DB_USER: ${DB_USER:-netly}
       DB_PASSWORD: ${DB_PASSWORD:-netly}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  budget:
+    build: ./services/budget-service
+    image: netly-budget
+    environment:
+      <<: *budget-database
       JWT_SECRET: ${JWT_SECRET:-netly-dev-jwt-secret-change-me-32bytes}
       PROFILE_SERVICE_URL: http://profile:8081
     ports:
       - "8082:8082"
     depends_on:
-      postgres:
-        condition: service_healthy
+      budget-migrate:
+        condition: service_completed_successfully
       profile:
         condition: service_started
 

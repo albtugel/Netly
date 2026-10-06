@@ -29,7 +29,19 @@ The connection is configured only through these variables; [`.env.example`](../.
 info netly-budget: [App] Connected to PostgreSQL 16.x at postgres:5432, database netly_budget as netly
 ```
 
-On start-up the service creates its tables (`subscriptions`, `debts`, `goals`) if they do not exist. CHECK constraints in the schema repeat the API rules as a second line of defence.
+## Database schema and migrations
+
+The schema lives in migrations under [`Sources/App/Database/Migrations`](Sources/App/Database/Migrations), applied with [`postgres-migrations`](https://github.com/hummingbird-project/postgres-migrations):
+
+| Command        | What it does                                                         |
+| -------------- | -------------------------------------------------------------------- |
+| `App migrate`  | Applies pending migrations in one transaction; on an empty database it creates the whole schema |
+| `App rollback` | Reverts the newest migration                                         |
+| `App` / `App serve` | Starts the server; refuses to start if the schema is behind the code |
+
+Under docker compose the one-shot `budget-migrate` container runs `migrate` before `budget` starts; run the commands by hand with `docker compose run --rm budget-migrate` and `docker compose run --rm budget rollback`.
+
+Tables, keys, constraints, index rationale and the ER diagram: [`docs/database.md`](../../docs/database.md).
 
 ## Test
 
