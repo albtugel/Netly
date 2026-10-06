@@ -7,15 +7,15 @@ import Testing
 
 @testable import App
 
-private let postgresTestURL = ProcessInfo.processInfo.environment["POSTGRES_TEST_URL"]
+private let postgresTestConfiguration = try? PostgresClient.Configuration.fromEnvironment(ProcessInfo.processInfo.environment)
 
-/// Runs the HTTP API against a real database. Enabled only when `POSTGRES_TEST_URL` is set, e.g.
-/// `POSTGRES_TEST_URL=postgres://netly:netly@postgres:5432/netly_budget swift test`.
-@Suite(.enabled(if: postgresTestURL != nil), .serialized)
+/// Runs the HTTP API against a real database. Enabled only when the `DB_*` variables are set, e.g.
+/// `DB_HOST=localhost DB_NAME=netly_budget DB_USER=netly DB_PASSWORD=netly swift test`.
+@Suite(.enabled(if: postgresTestConfiguration != nil), .serialized)
 struct PostgresIntegrationTests {
     private func withPostgresAPI(_ body: @escaping @Sendable (any TestClientProtocol) async throws -> Void) async throws {
         let logger = Logger(label: "postgres-tests")
-        let client = PostgresClient(configuration: try .init(databaseURL: postgresTestURL!), backgroundLogger: logger)
+        let client = PostgresClient(configuration: postgresTestConfiguration!, backgroundLogger: logger)
         try await withThrowingTaskGroup(of: Void.self) { group in
             group.addTask { await client.run() }
             try await Schema.migrate(client: client, logger: logger)
@@ -28,6 +28,21 @@ struct PostgresIntegrationTests {
                 try await body(client)
             }
             group.cancelAll()
+        }
+    }
+
+    @Test func applicationConnectsOnStartUp() async throws {
+        let app = try await buildApplication(
+            configuration: AppConfiguration(
+                hostname: "127.0.0.1",
+                port: 0,
+                jwtSecret: TestSupport.secret,
+                database: postgresTestConfiguration!
+            )
+        )
+        try await app.test(.router) { client in
+            let response = try await client.execute(uri: "/health", method: .get)
+            #expect(response.status == .ok)
         }
     }
 

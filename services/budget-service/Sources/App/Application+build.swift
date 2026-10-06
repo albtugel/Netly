@@ -20,31 +20,20 @@ func buildApplication(configuration: AppConfiguration) async throws -> some Appl
 
     let keys = await JWTKeyCollection.hmac(secret: configuration.jwtSecret)
 
-    let postgres: PostgresClient?
-    let repositories: Repositories
-    if let databaseURL = configuration.databaseURL {
-        let client = PostgresClient(configuration: try .init(databaseURL: databaseURL), backgroundLogger: logger)
-        postgres = client
-        repositories = .postgres(client: client, logger: logger)
-    } else {
-        logger.warning("DATABASE_URL is not set, data is kept in memory and lost on restart")
-        postgres = nil
-        repositories = .inMemory()
-    }
+    let postgres = PostgresClient(configuration: configuration.database, backgroundLogger: logger)
 
     var app = Application(
-        router: buildRouter(keys: keys, repositories: repositories),
+        router: buildRouter(keys: keys, repositories: .postgres(client: postgres, logger: logger)),
         configuration: .init(
             address: .hostname(configuration.hostname, port: configuration.port),
             serverName: serviceName
         ),
         logger: logger
     )
-    if let postgres {
-        app.addServices(postgres)
-        app.beforeServerStarts { [logger] in
-            try await Schema.migrate(client: postgres, logger: logger)
-        }
+    app.addServices(postgres)
+    app.beforeServerStarts { [logger] in
+        try await postgres.logConnection(to: configuration.database, logger: logger)
+        try await Schema.migrate(client: postgres, logger: logger)
     }
     return app
 }

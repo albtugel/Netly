@@ -7,6 +7,8 @@ Framework: Hummingbird 2. Default port: 8082.
 ## Run
 
 ```bash
+cp ../../.env.example ../../.env    # once; adjust if needed
+set -a && . ../../.env && set +a
 swift run
 ```
 
@@ -14,7 +16,18 @@ swift run
 | -------- | --------- | ------------------ |
 | `PORT`   | `8082`    | HTTP port          |
 | `JWT_SECRET` | development secret | HS256 key shared with Profile Service, at least 32 bytes |
-| `DATABASE_URL` | — | `postgres://user:password@host:port/database`; add `?sslmode=require` for TLS. Without it data is kept in memory |
+| `DB_HOST` | — | PostgreSQL host, required |
+| `DB_PORT` | `5432` | PostgreSQL port |
+| `DB_NAME` | — | Database name, required |
+| `DB_USER` | — | Database user, required |
+| `DB_PASSWORD` | — | Database password, required |
+| `DB_SSLMODE` | — | `require` forces TLS; otherwise the connection is plain, as on the internal compose network |
+
+The connection is configured only through these variables; [`.env.example`](../../.env.example) lists them with local defaults. The service refuses to start if a required one is missing, and on start-up logs the server it connected to:
+
+```
+info netly-budget: [App] Connected to PostgreSQL 16.x at postgres:5432, database netly_budget as netly
+```
 
 On start-up the service creates its tables (`subscriptions`, `debts`, `goals`) if they do not exist. CHECK constraints in the schema repeat the API rules as a second line of defence.
 
@@ -26,10 +39,10 @@ swift test
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
 
-Integration tests against a real PostgreSQL run only when `POSTGRES_TEST_URL` is set:
+Integration tests against a real PostgreSQL run only when the `DB_*` variables are set:
 
 ```bash
-POSTGRES_TEST_URL=postgres://netly:netly@localhost:5432/netly_budget swift test
+set -a && . ../../.env && set +a && swift test
 ```
 
 ## Errors
