@@ -173,4 +173,47 @@ struct PostgresIntegrationTests {
             #expect(try await strangerAPI.send(.post, "/api/v1/subscriptions", json: netflix).status == .created)
         }
     }
+
+    /// The transactional scenario: step 1 inserts the contribution, step 2 raises `goals.saved_amount`.
+    /// When step 2 breaks the target constraint, step 1 must be rolled back as well.
+    @Test func contributionPastTargetRollsBackBothSteps() async throws {
+        let token = try await TestSupport.token()
+        let goalBody = #"{"name": "Laptop", "targetAmount": 1500, "savedAmount": 300, "targetDate": "2027-09-26", "priority": 8}"#
+        try await withMigratedClient { postgres, logger in
+            let router = buildRouter(
+                keys: await TestSupport.keys(),
+                repositories: .postgres(client: postgres, logger: logger),
+                clock: { TestSupport.now }
+            )
+            try await Application(router: router).test(.router) { client in
+                let api = APIClient(client: client, token: token)
+                let goal = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.post, "/api/v1/goals", json: goalBody))
+
+                let accepted = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 200.5}"#)
+                #expect(accepted.status == .created)
+                #expect(try TestSupport.decode(GoalContribution.CreatedResponse.self, from: accepted).goal.savedAmount == Decimal(string: "500.5"))
+
+                let rejected = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 1000}"#)
+                #expect(try TestSupport.problem(from: rejected).errors?.map(\.code) == ["exceeds_target"])
+
+                let after = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.get, "/api/v1/goals/\(goal.id)"))
+                #expect(after.savedAmount == Decimal(string: "500.5"))
+
+                let rows = try await postgres.query(
+                    "SELECT count(*) FROM goal_contributions WHERE goal_id = \(UUID(uuidString: goal.id)!)"
+                )
+                for try await count in rows.decode(Int.self) {
+                    #expect(count == 1)
+                }
+
+                #expect(try await api.send(.delete, "/api/v1/goals/\(goal.id)").status == .noContent)
+                let orphans = try await postgres.query(
+                    "SELECT count(*) FROM goal_contributions WHERE goal_id = \(UUID(uuidString: goal.id)!)"
+                )
+                for try await count in orphans.decode(Int.self) {
+                    #expect(count == 0)
+                }
+            }
+        }
+    }
 }

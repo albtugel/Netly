@@ -60,6 +60,7 @@ func buildRouter(
     ResourceController(repository: repositories.subscriptions, clock: clock).addRoutes(to: api)
     ResourceController(repository: repositories.debts, clock: clock).addRoutes(to: api)
     ResourceController(repository: repositories.goals, clock: clock).addRoutes(to: api)
+    GoalContributionController(repository: repositories.goalContributions, clock: clock).addRoutes(to: api)
 
     return router
 }
