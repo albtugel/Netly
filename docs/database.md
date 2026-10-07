@@ -10,11 +10,18 @@
 
 ```mermaid
 erDiagram
-    goals ||--o{ goal_contributions : "пополняется"
+    users ||..o{ subscriptions : "user_id (без FK)"
+    users ||..o{ debts : "user_id (без FK)"
+    users ||..o{ goals : "user_id (без FK)"
+    goals ||--o{ goal_contributions : "goal_id (FK)"
+
+    users["users — Profile Service, база netly_profile"] {
+        uuid id PK "логическая ссылка из JWT (sub)"
+    }
 
     subscriptions {
         uuid id PK
-        uuid user_id "NOT NULL"
+        uuid user_id "NOT NULL; ссылка на users.id без FK"
         text name "NOT NULL; 1-100 символов; UK (user_id, lower(name))"
         numeric price "NOT NULL; NUMERIC(12,2); > 0"
         text billing_cycle "NOT NULL; weekly | monthly | quarterly | yearly"
@@ -25,7 +32,7 @@ erDiagram
 
     debts {
         uuid id PK
-        uuid user_id "NOT NULL"
+        uuid user_id "NOT NULL; ссылка на users.id без FK"
         text creditor "NOT NULL; 1-100 символов"
         numeric amount "NOT NULL; NUMERIC(12,2); > 0"
         date due_date "NOT NULL"
@@ -35,7 +42,7 @@ erDiagram
 
     goals {
         uuid id PK
-        uuid user_id "NOT NULL"
+        uuid user_id "NOT NULL; ссылка на users.id без FK"
         text name "NOT NULL; 1-100 символов"
         numeric target_amount "NOT NULL; NUMERIC(12,2); > 0"
         numeric saved_amount "NOT NULL; DEFAULT 0; 0 .. target_amount"
@@ -48,16 +55,25 @@ erDiagram
 
     goal_contributions {
         uuid id PK
-        uuid goal_id FK "NOT NULL; ON DELETE CASCADE"
+        uuid goal_id FK "NOT NULL; REFERENCES goals(id) ON DELETE CASCADE"
         numeric amount "NOT NULL; NUMERIC(12,2); > 0"
         text note "NULL; до 200 символов"
         timestamptz created_at "NOT NULL; DEFAULT now()"
     }
 ```
 
-Связь `goals` → `goal_contributions` — один ко многим: у цели может быть сколько угодно пополнений, каждое пополнение принадлежит ровно одной цели. Остальные таблицы связаны только через `user_id`.
+Связь `goals` → `goal_contributions` — один ко многим: у цели может быть сколько угодно пополнений, каждое пополнение принадлежит ровно одной цели. Это единственный внешний ключ схемы.
 
-`user_id` — идентификатор пользователя из JWT. Сами пользователи хранятся в базе Profile Service (`netly_profile`), а у каждого микросервиса своя база, поэтому внешнего ключа на пользователя нет и быть не может: ссылочную целостность между сервисами обеспечивает подпись токена, а не СУБД.
+`user_id` в `subscriptions`, `debts` и `goals` ссылается на пользователя. Таблица `users` принадлежит Profile Service и хранится в его базе `netly_profile`, а у каждого микросервиса своя база, поэтому на диаграмме `users` — внешняя сущность, а связи с ней нарисованы пунктиром. Внешнего ключа на пользователя нет и быть не может: PostgreSQL не ссылается на таблицы другой базы. `user_id` берётся из поля `sub` подписанного JWT, так что ссылочную целостность между сервисами обеспечивает подпись токена, а не СУБД.
+
+## Связи между таблицами
+
+| Ссылка                        | На что ссылается             | Тип         | Как обеспечивается                                              |
+| ----------------------------- | ---------------------------- | ----------- | --------------------------------------------------------------- |
+| `goal_contributions.goal_id`  | `goals.id`                   | 1:N, FK     | Внешний ключ `goal_contributions_goal_id_fkey`, ON DELETE CASCADE |
+| `subscriptions.user_id`       | `users.id` (Profile Service) | 1:N, без FK | Значение из подписанного JWT; фильтр `user_id` во всех запросах |
+| `debts.user_id`               | `users.id` (Profile Service) | 1:N, без FK | То же                                                           |
+| `goals.user_id`               | `users.id` (Profile Service) | 1:N, без FK | То же                                                           |
 
 ## Таблицы
 

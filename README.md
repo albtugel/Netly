@@ -145,7 +145,7 @@ The contract is valid. The three remaining warnings are expected: no license, a 
 
 ### Database
 
-Budget Service keeps its data in the `netly_budget` PostgreSQL database: `subscriptions`, `debts`, `goals` and `goal_contributions`, with `goals` 1:N `goal_contributions`.
+Budget Service keeps its data in the `netly_budget` PostgreSQL database: `subscriptions`, `debts`, `goals` and `goal_contributions`, with `goals` 1:N `goal_contributions` through a foreign key. Every table carries the owner's `user_id`, a logical reference to `users` in Profile Service's own `netly_profile` database: it comes from the signed JWT, and there is no foreign key across databases.
 
 ![ER diagram](docs/er-diagram.png)
 
