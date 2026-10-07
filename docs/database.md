@@ -16,7 +16,10 @@ erDiagram
     goals ||--o{ goal_contributions : "goal_id (FK)"
 
     users["users — Profile Service, база netly_profile"] {
-        uuid id PK "логическая ссылка из JWT (sub)"
+        uuid id PK "передается в JWT как sub"
+        text email "NOT NULL; UNIQUE; логин"
+        text password_hash "NOT NULL; хеш пароля, не сам пароль"
+        timestamptz created_at "NOT NULL; DEFAULT now(); дата регистрации"
     }
 
     subscriptions {
@@ -76,6 +79,17 @@ erDiagram
 | `goals.user_id`               | `users.id` (Profile Service) | 1:N, без FK | То же                                                           |
 
 ## Таблицы
+
+### `users` — пользователи (Profile Service)
+
+Таблица принадлежит Profile Service и хранится в его базе `netly_profile`, а не в `netly_budget`. Она показана на диаграмме, потому что на неё ссылается `user_id` всех таблиц Budget Service. Profile Service пока содержит только `/health`; таблица описана по проекту из [`requirements.md`](requirements.md) и будет создана его миграциями.
+
+| Поле            | Тип           | Ограничения                                       |
+| --------------- | ------------- | ------------------------------------------------- |
+| `id`            | `UUID`        | PK; передаётся в JWT как `sub`                    |
+| `email`         | `TEXT`        | NOT NULL, UNIQUE; логин                           |
+| `password_hash` | `TEXT`        | NOT NULL; хеш пароля, сам пароль не хранится      |
+| `created_at`    | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()`; дата регистрации        |
 
 ### `subscriptions` — подписки
 
