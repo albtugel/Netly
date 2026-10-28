@@ -18,7 +18,8 @@ erDiagram
     users["users — Profile Service, база netly_profile"] {
         uuid id PK "передается в JWT как sub"
         text email "NOT NULL; UNIQUE; логин"
-        text password_hash "NOT NULL; хеш пароля, не сам пароль"
+        text password_hash "NOT NULL; bcrypt-хеш, не сам пароль"
+        text role "NOT NULL; DEFAULT user; user | admin"
         timestamptz created_at "NOT NULL; DEFAULT now(); дата регистрации"
     }
 
@@ -82,14 +83,17 @@ erDiagram
 
 ### `users` — пользователи (Profile Service)
 
-Таблица принадлежит Profile Service и хранится в его базе `netly_profile`, а не в `netly_budget`. Она показана на диаграмме, потому что на неё ссылается `user_id` всех таблиц Budget Service. Profile Service пока содержит только `/health`; таблица описана по проекту из [`requirements.md`](requirements.md) и будет создана его миграциями.
+Таблица принадлежит Profile Service и хранится в его базе `netly_profile`, а не в `netly_budget`. Она показана на диаграмме, потому что на неё ссылается `user_id` всех таблиц Budget Service. Создаётся миграцией `001_create_users` Profile Service ([`CreateUsers.swift`](../services/profile-service/Sources/App/Migrations/CreateUsers.swift)).
 
-| Поле            | Тип           | Ограничения                                       |
-| --------------- | ------------- | ------------------------------------------------- |
-| `id`            | `UUID`        | PK; передаётся в JWT как `sub`                    |
-| `email`         | `TEXT`        | NOT NULL, UNIQUE; логин                           |
-| `password_hash` | `TEXT`        | NOT NULL; хеш пароля, сам пароль не хранится      |
-| `created_at`    | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()`; дата регистрации        |
+| Поле            | Тип           | Ограничения                                                          |
+| --------------- | ------------- | -------------------------------------------------------------------- |
+| `id`            | `UUID`        | PK; передаётся в JWT как `sub`                                       |
+| `email`         | `TEXT`        | NOT NULL; `users_email_key` UNIQUE; 3–254 символа, только нижний регистр |
+| `password_hash` | `TEXT`        | NOT NULL; bcrypt-хеш (`$2b$12$…`), сам пароль не хранится            |
+| `role`          | `TEXT`        | NOT NULL, DEFAULT `user`; `user` или `admin`                          |
+| `created_at`    | `TIMESTAMPTZ` | NOT NULL, DEFAULT `now()`; дата регистрации                          |
+
+Email хранится приведённым к нижнему регистру, поэтому обычный UNIQUE не пускает `Alibek@…` и `alibek@…` как два аккаунта. Индекс, который PostgreSQL строит под `users_email_key`, обслуживает и поиск по email при каждом входе.
 
 ### `subscriptions` — подписки
 
@@ -171,6 +175,7 @@ erDiagram
 | `goal_contributions_goal_created_idx` | 1      | `GET /goals/{id}/contributions` и каскадное удаление по `goal_id` (PostgreSQL не создаёт индекс под внешний ключ сам) |
 | `subscriptions_user_name_key`       | 1        | Уникальный индекс, реализует ограничение UNIQUE                   |
 | `goals_user_status_idx`             | 2        | `GET /goals?status=active`                                        |
+| `users_email_key` (Profile Service) | profile 1 | `POST /auth/login`: `WHERE email = $1`; заодно уникальность email |
 
 **Обоснование `goals_user_status_idx (user_id, status, created_at, id)`.** Самый частый запрос к целям — список активных целей пользователя: экран целей открывается с фильтром `status=active`, и тот же набор нужен при распределении свободного остатка. Индекс покрывает и условие `WHERE user_id = $1 AND status = $2`, и сортировку `ORDER BY created_at, id`, поэтому PostgreSQL читает ровно одну страницу результата из индекса без отдельной сортировки. Индекс только по `user_id` заставил бы читать все цели пользователя, включая завершённые и архивные, которых со временем становится большинство.
 
@@ -180,6 +185,17 @@ erDiagram
 | ------------------------------------ | ------------------------------------------------------------------------ |
 | `M001_CreateBudgetSchema.swift`      | Создаёт четыре таблицы со всеми ограничениями и базовыми индексами        |
 | `M002_AddGoalStatusIndex.swift`      | Добавляет индекс `goals_user_status_idx` под фильтр `GET /goals?status=` |
+
+Profile Service ведёт свою схему миграциями Fluent (таблица истории `_fluent_migrations`):
+
+| Файл                    | Что делает                                                          |
+| ----------------------- | ------------------------------------------------------------------- |
+| `CreateUsers.swift`     | `001_create_users`: таблица `users` с UNIQUE email и CHECK на роль   |
+
+```bash
+docker compose run --rm profile-migrate                  # применить
+docker compose run --rm profile migrate --revert --yes   # откатить последний пакет
+```
 
 Инструмент — [`postgres-migrations`](https://github.com/hummingbird-project/postgres-migrations) из экосистемы Hummingbird. Применённые миграции он записывает в таблицу `_hb_pg_migrations` и выполняет их в одной транзакции: если упадёт любая, схема останется прежней.
 

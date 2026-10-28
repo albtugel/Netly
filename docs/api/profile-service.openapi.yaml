@@ -1,0 +1,276 @@
+openapi: 3.1.0
+info:
+  title: Netly Profile Service API
+  version: 1.0.0
+  description: |
+    Registration, login and accounts. Issues the access token that Budget Service accepts.
+
+    * Passwords are stored only as bcrypt hashes (cost 12).
+    * `POST /auth/login` returns an HS256 JWT valid for 15 minutes with `sub` (user id), `role`, `iat` and `exp`.
+    * Every account registers with the `user` role. A `role` in the request body is ignored; `admin` is granted only by the `App make-admin <email>` command.
+    * Every error is `application/problem+json` (RFC 9457) in the same shape as Budget Service.
+servers:
+  - url: http://localhost:8081
+    description: docker compose
+
+tags:
+  - name: Auth
+    description: Public registration and login.
+  - name: Users
+    description: The caller's own account.
+  - name: Admin
+    description: Operations for the `admin` role only.
+  - name: Health
+    description: Liveness probe.
+
+paths:
+  /health:
+    get:
+      tags: [Health]
+      summary: Liveness probe
+      operationId: getHealth
+      security: []
+      responses:
+        "200":
+          description: The service is up
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service]
+                properties:
+                  status: { type: string, const: ok }
+                  service: { type: string, const: netly-profile }
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register an account
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Credentials" }
+            example: { email: alibek@netly.kz, password: correct horse }
+      responses:
+        "201":
+          description: Registered with the `user` role
+          headers:
+            Location:
+              description: Path of the caller's account
+              schema: { type: string, const: /api/v1/users/me }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "409":
+          description: An account with this email already exists (case-insensitive)
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: about:blank
+                title: Conflict
+                status: 409
+                code: conflict
+                detail: An account with this email already exists
+                instance: /api/v1/auth/register
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: Exchange email and password for an access token
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Credentials" }
+      responses:
+        "200":
+          description: Credentials match
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Token" }
+        "400": { $ref: "#/components/responses/MalformedJSON" }
+        "401":
+          description: Wrong password or unknown email; both answer the same, so the response does not reveal which emails are registered
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                code: unauthorized
+                detail: Invalid email or password
+                instance: /api/v1/auth/login
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+  /api/v1/users/me:
+    get:
+      tags: [Users]
+      summary: The account behind the token
+      operationId: getCurrentUser
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: The caller's account
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/admin/users:
+    get:
+      tags: [Admin]
+      summary: List every account
+      operationId: listUsers
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: offset, in: query, required: false, schema: { type: integer, minimum: 0, default: 0 } }
+      responses:
+        "200":
+          description: One page of accounts, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, limit, offset, total]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/User" } }
+                  limit: { type: integer }
+                  offset: { type: integer }
+                  total: { type: integer }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: The token is valid but its role is not `admin`
+          content:
+            application/problem+json:
+              schema: { $ref: "#/components/schemas/Problem" }
+              example:
+                type: about:blank
+                title: Forbidden
+                status: 403
+                code: forbidden
+                detail: Requires the admin role
+                instance: /api/v1/admin/users
+        "422": { $ref: "#/components/responses/ValidationFailed" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: HS256 token from `POST /api/v1/auth/login`, signed with the shared `JWT_SECRET`.
+
+  schemas:
+    Role:
+      type: string
+      enum: [user, admin]
+    Credentials:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: Trimmed and lowercased before it is stored or looked up.
+        password:
+          type: string
+          minLength: 8
+          description: 8 characters to 72 bytes; bcrypt ignores everything past 72 bytes.
+          writeOnly: true
+    User:
+      type: object
+      required: [id, email, role, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        role: { $ref: "#/components/schemas/Role" }
+        createdAt: { type: string, format: date-time }
+    Token:
+      type: object
+      required: [accessToken, tokenType, expiresIn]
+      properties:
+        accessToken: { type: string, description: "JWT with sub, role, iat and exp claims" }
+        tokenType: { type: string, const: Bearer }
+        expiresIn: { type: integer, const: 900, description: Lifetime in seconds }
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        field: { type: string }
+        code: { type: string, enum: [required, invalid_type, invalid_format, too_short, too_long, out_of_range] }
+        message: { type: string }
+    Problem:
+      type: object
+      description: RFC 9457 problem document with `code` and `errors` extensions.
+      required: [type, title, status, code, detail, instance]
+      properties:
+        type: { type: string, const: about:blank }
+        title: { type: string }
+        status: { type: integer }
+        code:
+          type: string
+          enum: [malformed_json, unauthorized, forbidden, not_found, conflict, validation_failed, internal_error]
+        detail: { type: string }
+        instance: { type: string, description: Request path }
+        errors:
+          type: array
+          description: Present only for `validation_failed`; lists every invalid field.
+          items: { $ref: "#/components/schemas/FieldError" }
+
+  responses:
+    MalformedJSON:
+      description: The body is not valid JSON
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Malformed JSON
+            status: 400
+            code: malformed_json
+            detail: Request body is not valid JSON
+            instance: /api/v1/auth/login
+    Unauthorized:
+      description: Missing, invalid or expired bearer token
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Unauthorized
+            status: 401
+            code: unauthorized
+            detail: Token has expired
+            instance: /api/v1/users/me
+    NotFound:
+      description: The account behind a still-valid token no longer exists
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+    ValidationFailed:
+      description: A field is missing, has the wrong type or breaks a rule; every broken rule is listed
+      content:
+        application/problem+json:
+          schema: { $ref: "#/components/schemas/Problem" }
+          example:
+            type: about:blank
+            title: Validation failed
+            status: 422
+            code: validation_failed
+            detail: 2 fields are invalid
+            instance: /api/v1/auth/register
+            errors:
+              - { field: email, code: invalid_format, message: Must be an email address }
+              - { field: password, code: too_short, message: Must be at least 8 characters }

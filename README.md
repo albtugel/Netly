@@ -75,7 +75,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service has a skeleton with a `/health` endpoint. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, and errors share one `application/problem+json` format. The API contract is [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
+Current state: Profile Service registers users, stores bcrypt password hashes in PostgreSQL, issues 15-minute JWTs with a `user` or `admin` role and guards an admin-only route. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, and errors share one `application/problem+json` format. The API contracts are [`docs/api/profile-service.openapi.yaml`](docs/api/profile-service.openapi.yaml) and [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
 Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker. The Swift 6.4 toolchain from the Xcode beta cannot build the `swift-collections` 1.7.0 dependency yet; use Docker with it.
 
@@ -87,7 +87,7 @@ docker compose up --build
 
 Set `JWT_SECRET` (at least 32 bytes) to override the development secret used by default. Every setting is listed in [`.env.example`](.env.example); copy it to `.env` to change them, and docker compose picks the file up.
 
-This brings up the `profile`, `budget` and `postgres` containers, with `postgres` hosting two databases (`netly_profile` and `netly_budget`). Before `budget` starts, the one-shot `budget-migrate` container applies pending database migrations.
+This brings up the `profile`, `budget` and `postgres` containers, with `postgres` hosting two databases (`netly_profile` and `netly_budget`). Before each service starts, its one-shot `profile-migrate` or `budget-migrate` container applies pending database migrations.
 
 A `pgdata` volume created before migrations were introduced already holds tables without a migration history; reset it once with `docker compose down -v`.
 
@@ -138,7 +138,7 @@ docker run --rm --network netly_default -v "$PWD":/src -w /src \
 Check the OpenAPI contract with [Redocly CLI](https://redocly.com/docs/cli/):
 
 ```bash
-npx @redocly/cli lint docs/api/budget-service.openapi.yaml
+npx @redocly/cli lint docs/api/budget-service.openapi.yaml docs/api/profile-service.openapi.yaml
 ```
 
 The contract is valid. The three remaining warnings are expected: no license, a `localhost` server URL, and no `4xx` response on `/health`.
@@ -161,21 +161,35 @@ docker compose run --rm budget rollback    # revert the newest migration
 
 The server refuses to start while the schema is behind the code.
 
-### Calling the Budget API
+### Authentication and roles
 
-Profile Service does not issue tokens yet, so mint a development JWT signed with the compose secret:
+Profile Service owns accounts. A password is stored only as a bcrypt hash (cost 12); login returns an HS256 JWT with `sub` (user id), `role` and a 15-minute `exp`, which Budget Service verifies with the shared `JWT_SECRET`.
+
+| Operation                                   | Guest | `user` | `admin` |
+| ------------------------------------------- | ----- | ------ | ------- |
+| `POST /auth/register`, `POST /auth/login`   | yes   | yes    | yes     |
+| `GET /users/me`                             | 401   | yes    | yes     |
+| CRUD on one's own budget records            | 401   | yes    | yes     |
+| Another user's budget record                | 401   | 404    | 404     |
+| `GET /admin/users`                          | 401   | 403    | yes     |
+
+Every account registers as `user`; a `role` in the request body is ignored. Grant `admin` with `docker compose run --rm profile make-admin <email>`. Details: [`services/profile-service/README.md`](services/profile-service/README.md).
+
+### Calling the API
 
 ```bash
-TOKEN=$(scripts/dev-token.sh)
+curl -X POST http://localhost:8081/api/v1/auth/register -H "Content-Type: application/json" \
+  -d '{"email": "alibek@netly.kz", "password": "correct horse"}'
+TOKEN=$(curl -s -X POST http://localhost:8081/api/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"email": "alibek@netly.kz", "password": "correct horse"}' | jq -r .accessToken)
+
 curl -X POST http://localhost:8082/api/v1/subscriptions \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"name": "Netflix", "price": 119.88, "billingCycle": "yearly", "nextChargeDate": "2026-10-15"}'
-
+  -d '{"name": "Netflix", "price": 119.88, "billingCycle": "yearly", "nextChargeDate": "2026-12-15"}'
 curl "http://localhost:8082/api/v1/goals?status=active" -H "Authorization: Bearer $TOKEN"
-curl -X POST http://localhost:8082/api/v1/goals/<goal-id>/contributions \
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-  -d '{"amount": 200, "note": "September salary"}'
 ```
+
+[`scripts/demo-auth.sh`](scripts/demo-auth.sh) runs the whole flow and shows `201`, `200`, `401`, `403`, `404` and `422`. For Budget Service alone, `scripts/dev-token.sh` mints a token without Profile Service.
 
 ### Health check
 
@@ -196,6 +210,7 @@ Response:
 netly/
 ├── docs/
 │   ├── api/
+│   │   ├── profile-service.openapi.yaml  Profile Service contract (OpenAPI 3.1)
 │   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
 │   │   └── budget-service.md             validation, error format, examples
 │   ├── requirements.md          business problem, user stories, decomposition
@@ -206,7 +221,8 @@ netly/
 │   └── architecture.png
 ├── scripts/
 │   ├── init-databases.sh        creates the additional databases in PostgreSQL
-│   └── dev-token.sh             issues a development JWT for manual API calls
+│   ├── dev-token.sh             issues a development JWT for Budget Service alone
+│   └── demo-auth.sh             register, log in and call both services
 ├── services/
 │   ├── profile-service/
 │   ├── budget-service/
