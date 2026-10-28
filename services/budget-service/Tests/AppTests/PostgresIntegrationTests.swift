@@ -162,7 +162,7 @@ struct PostgresIntegrationTests {
 
             let duplicate = try await api.send(.post, "/api/v1/subscriptions", json: netflix.replacingOccurrences(of: "Netflix", with: "netflix"))
             #expect(duplicate.status == .conflict)
-            #expect(try TestSupport.problem(from: duplicate).code == "conflict")
+            #expect(try TestSupport.errorBody(from: duplicate).code == "conflict")
 
             let spotify = #"{"name": "Spotify", "price": 4.99, "billingCycle": "monthly", "nextChargeDate": "2026-10-01"}"#
             let other = try TestSupport.decode(SubscriptionFields.Response.self, from: try await api.send(.post, "/api/v1/subscriptions", json: spotify))
@@ -194,7 +194,7 @@ struct PostgresIntegrationTests {
                 #expect(try TestSupport.decode(GoalContribution.CreatedResponse.self, from: accepted).goal.savedAmount == Decimal(string: "500.5"))
 
                 let rejected = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 1000}"#)
-                #expect(try TestSupport.problem(from: rejected).errors?.map(\.code) == ["exceeds_target"])
+                #expect(try TestSupport.errorBody(from: rejected).details.map(\.code) == ["exceeds_target"])
 
                 let after = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.get, "/api/v1/goals/\(goal.id)"))
                 #expect(after.savedAmount == Decimal(string: "500.5"))

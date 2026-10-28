@@ -2,7 +2,7 @@
 
 The machine-readable contract is [`budget-service.openapi.yaml`](budget-service.openapi.yaml) (OpenAPI 3.1). This page describes the same API for people: conventions, validation rules, the error format, and a request/response example for every operation.
 
-All examples below are real responses from the service running against PostgreSQL, taken on 2026-09-26; the goal contributions, the status filter and the `409` example were taken on 2026-10-07 during the run recorded in [`../verification.md`](../verification.md). Only the `Date`, `Server` and `Content-Length` headers are left out.
+All examples below are real responses from the service running against PostgreSQL, taken on 2026-09-26; the goal contributions, the status filter and the `409` example were taken on 2026-10-07 during the run recorded in [`../verification.md`](../verification.md). Only the `Date`, `Server` and `Content-Length` headers are left out. Error bodies are shown in the `{"error": …}` format introduced on 2026-10-28; their codes and messages are the ones the service returned.
 
 ## Conventions
 
@@ -96,27 +96,26 @@ A top-up of a goal. Recording one adds its `amount` to the goal's `savedAmount` 
 
 ## Error format
 
-Every error, including an unknown route, is `application/problem+json` as defined by [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457), with two extensions:
-
-- `code`: stable machine-readable identifier; clients branch on it, not on `title` or `detail`.
-- `errors`: present only for `validation_failed`, with one entry per invalid field (`field`, `code`, `message`).
-
-`type` is always `about:blank`, so `title` is the status summary and `code` carries the specific meaning.
+Every error, including an unknown route and an unexpected failure, has the same body:
 
 ```json
 {
-  "code": "validation_failed",
-  "detail": "2 fields are invalid",
-  "errors": [
-    { "code": "out_of_range", "field": "limit", "message": "Must be between 1 and 100" },
-    { "code": "out_of_range", "field": "offset", "message": "Must be greater than or equal to 0" }
-  ],
-  "instance": "/api/v1/debts",
-  "status": 422,
-  "title": "Validation failed",
-  "type": "about:blank"
+  "error": {
+    "code": "validation_failed",
+    "message": "2 fields are invalid",
+    "details": [
+      { "code": "out_of_range", "field": "limit", "message": "Must be between 1 and 100" },
+      { "code": "out_of_range", "field": "offset", "message": "Must be greater than or equal to 0" }
+    ]
+  }
 }
 ```
+
+- `code`: stable machine-readable identifier; clients branch on it, not on `message`.
+- `message`: a human-readable explanation.
+- `details`: one entry per invalid field (`field`, `code`, `message`) for `validation_failed`; an empty array for every other error.
+
+The response is `application/json`, and the HTTP status carries the class of the error. A global middleware (`APIErrorMiddleware`) turns every error into this shape, so an unexpected exception never leaks a stack trace: it is logged and answered with `500 internal_error`.
 
 | Status | `code`              | When                                                                                  |
 | ------ | ------------------- | ------------------------------------------------------------------------------------- |
@@ -129,7 +128,7 @@ Every error, including an unknown route, is `application/problem+json` as define
 
 Field-level codes:
 
-| `errors[].code`        | Meaning                                              |
+| `details[].code`       | Meaning                                              |
 | ---------------------- | ---------------------------------------------------- |
 | `required`             | Field is missing or `null` on create                 |
 | `invalid_type`         | Wrong JSON type, e.g. a string where a number is due |
@@ -545,18 +544,16 @@ A contribution that would take `savedAmount` past `targetAmount` (here 500 + 150
 
 ```http
 HTTP/1.1 422 Unprocessable Content
-Content-Type: application/problem+json
+Content-Type: application/json; charset=utf-8
 
 {
-  "code": "validation_failed",
-  "detail": "1 field is invalid",
-  "errors": [
-    { "code": "exceeds_target", "field": "amount", "message": "savedAmount plus amount must not exceed the goal's targetAmount" }
-  ],
-  "instance": "/api/v1/goals/ab9822c4-57d3-4be9-95a9-4235e2f3d135/contributions",
-  "status": 422,
-  "title": "Validation failed",
-  "type": "about:blank"
+  "error": {
+    "code": "validation_failed",
+    "message": "1 field is invalid",
+    "details": [
+      { "code": "exceeds_target", "field": "amount", "message": "savedAmount plus amount must not exceed the goal's targetAmount" }
+    ]
+  }
 }
 ```
 
@@ -590,7 +587,7 @@ Another user's goal, or a goal that does not exist, answers `404` on both routes
 
 ## Error examples
 
-Every error response has `Content-Type: application/problem+json`.
+Every error response has `Content-Type: application/json; charset=utf-8` and the body described in [Error format](#error-format).
 
 ### 400 — body is not JSON
 
@@ -601,12 +598,11 @@ curl -X POST $BASE/api/v1/subscriptions -H "Authorization: Bearer $TOKEN" \
 
 ```json
 {
-  "code": "malformed_json",
-  "detail": "Request body is not valid JSON",
-  "instance": "/api/v1/subscriptions",
-  "status": 400,
-  "title": "Malformed JSON",
-  "type": "about:blank"
+  "error": {
+    "code": "malformed_json",
+    "message": "Request body is not valid JSON",
+    "details": []
+  }
 }
 ```
 
@@ -616,16 +612,15 @@ curl -X POST $BASE/api/v1/subscriptions -H "Authorization: Bearer $TOKEN" \
 
 ```json
 {
-  "code": "unauthorized",
-  "detail": "Missing bearer token",
-  "instance": "/api/v1/subscriptions",
-  "status": 401,
-  "title": "Unauthorized",
-  "type": "about:blank"
+  "error": {
+    "code": "unauthorized",
+    "message": "Missing bearer token",
+    "details": []
+  }
 }
 ```
 
-A token signed with a different secret gives `"detail": "Invalid token"`. An expired one, e.g. `scripts/dev-token.sh <user> -60`, gives `"detail": "Token has expired"`.
+A token signed with a different secret gives `"message": "Invalid token"`. An expired one, e.g. `scripts/dev-token.sh <user> -60`, gives `"message": "Token has expired"`.
 
 ### 404 — another user's record
 
@@ -633,16 +628,15 @@ A goal that exists but belongs to another user answers exactly like a missing on
 
 ```json
 {
-  "code": "not_found",
-  "detail": "Goal 8dc1e790-2c2c-4cb2-a270-7aa437877316 was not found",
-  "instance": "/api/v1/goals/8dc1e790-2c2c-4cb2-a270-7aa437877316",
-  "status": 404,
-  "title": "Not found",
-  "type": "about:blank"
+  "error": {
+    "code": "not_found",
+    "message": "Goal 8dc1e790-2c2c-4cb2-a270-7aa437877316 was not found",
+    "details": []
+  }
 }
 ```
 
-An unknown route, e.g. `GET /api/v1/unknown`, answers `404` with `"detail": "Route not found"`.
+An unknown route, e.g. `GET /api/v1/unknown`, answers `404` with `"message": "Route not found"`.
 
 ### 409 — duplicate subscription name
 
@@ -655,15 +649,14 @@ curl -X POST $BASE/api/v1/subscriptions -H "Authorization: Bearer $TOKEN" -H "Co
 
 ```http
 HTTP/1.1 409 Conflict
-Content-Type: application/problem+json
+Content-Type: application/json; charset=utf-8
 
 {
-  "code": "conflict",
-  "detail": "A subscription with the same name already exists",
-  "instance": "/api/v1/subscriptions",
-  "status": 409,
-  "title": "Conflict",
-  "type": "about:blank"
+  "error": {
+    "code": "conflict",
+    "message": "A subscription with the same name already exists",
+    "details": []
+  }
 }
 ```
 
@@ -676,18 +669,16 @@ curl -X POST $BASE/api/v1/goals -H "Authorization: Bearer $TOKEN" -H "Content-Ty
 
 ```json
 {
-  "code": "validation_failed",
-  "detail": "4 fields are invalid",
-  "errors": [
-    { "code": "blank", "field": "name", "message": "Must not be blank" },
-    { "code": "too_precise", "field": "savedAmount", "message": "Must have at most 2 decimal places" },
-    { "code": "must_be_in_future", "field": "targetDate", "message": "Must be after 2026-09-26" },
-    { "code": "out_of_range", "field": "priority", "message": "Must be between 1 and 10" }
-  ],
-  "instance": "/api/v1/goals",
-  "status": 422,
-  "title": "Validation failed",
-  "type": "about:blank"
+  "error": {
+    "code": "validation_failed",
+    "message": "4 fields are invalid",
+    "details": [
+      { "code": "blank", "field": "name", "message": "Must not be blank" },
+      { "code": "too_precise", "field": "savedAmount", "message": "Must have at most 2 decimal places" },
+      { "code": "must_be_in_future", "field": "targetDate", "message": "Must be after 2026-09-26" },
+      { "code": "out_of_range", "field": "priority", "message": "Must be between 1 and 10" }
+    ]
+  }
 }
 ```
 
@@ -712,15 +703,13 @@ curl -X PATCH $BASE/api/v1/goals/8dc1e790-2c2c-4cb2-a270-7aa437877316 \
 
 ```json
 {
-  "code": "validation_failed",
-  "detail": "1 field is invalid",
-  "errors": [
-    { "code": "exceeds_target", "field": "savedAmount", "message": "Must not exceed targetAmount" }
-  ],
-  "instance": "/api/v1/goals/8dc1e790-2c2c-4cb2-a270-7aa437877316",
-  "status": 422,
-  "title": "Validation failed",
-  "type": "about:blank"
+  "error": {
+    "code": "validation_failed",
+    "message": "1 field is invalid",
+    "details": [
+      { "code": "exceeds_target", "field": "savedAmount", "message": "Must not exceed targetAmount" }
+    ]
+  }
 }
 ```
 
@@ -730,14 +719,12 @@ curl -X PATCH $BASE/api/v1/goals/8dc1e790-2c2c-4cb2-a270-7aa437877316 \
 
 ```json
 {
-  "code": "validation_failed",
-  "detail": "1 field is invalid",
-  "errors": [
-    { "code": "invalid_value", "field": "id", "message": "Must be a UUID" }
-  ],
-  "instance": "/api/v1/goals/not-a-uuid",
-  "status": 422,
-  "title": "Validation failed",
-  "type": "about:blank"
+  "error": {
+    "code": "validation_failed",
+    "message": "1 field is invalid",
+    "details": [
+      { "code": "invalid_value", "field": "id", "message": "Must be a UUID" }
+    ]
+  }
 }
 ```

@@ -8,7 +8,7 @@ info:
     * Passwords are stored only as bcrypt hashes (cost 12).
     * `POST /auth/login` returns an HS256 JWT valid for 15 minutes with `sub` (user id), `role`, `iat` and `exp`.
     * Every account registers with the `user` role. A `role` in the request body is ignored; `admin` is granted only by the `App make-admin <email>` command.
-    * Every error is `application/problem+json` (RFC 9457) in the same shape as Budget Service.
+    * Every error is `{"error": {"code": …, "message": …, "details": […]}}`, the same as Budget Service.
 servers:
   - url: http://localhost:8081
     description: docker compose
@@ -68,15 +68,13 @@ paths:
         "409":
           description: An account with this email already exists (case-insensitive)
           content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/Problem" }
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
               example:
-                type: about:blank
-                title: Conflict
-                status: 409
-                code: conflict
-                detail: An account with this email already exists
-                instance: /api/v1/auth/register
+                error:
+                  code: conflict
+                  message: An account with this email already exists
+                  details: []
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /api/v1/auth/login:
@@ -100,15 +98,13 @@ paths:
         "401":
           description: Wrong password or unknown email; both answer the same, so the response does not reveal which emails are registered
           content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/Problem" }
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
               example:
-                type: about:blank
-                title: Unauthorized
-                status: 401
-                code: unauthorized
-                detail: Invalid email or password
-                instance: /api/v1/auth/login
+                error:
+                  code: unauthorized
+                  message: Invalid email or password
+                  details: []
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
   /api/v1/users/me:
@@ -152,15 +148,13 @@ paths:
         "403":
           description: The token is valid but its role is not `admin`
           content:
-            application/problem+json:
-              schema: { $ref: "#/components/schemas/Problem" }
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
               example:
-                type: about:blank
-                title: Forbidden
-                status: 403
-                code: forbidden
-                detail: Requires the admin role
-                instance: /api/v1/admin/users
+                error:
+                  code: forbidden
+                  message: Requires the admin role
+                  details: []
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
 components:
@@ -211,66 +205,60 @@ components:
         field: { type: string }
         code: { type: string, enum: [required, invalid_type, invalid_format, too_short, too_long, out_of_range] }
         message: { type: string }
-    Problem:
+    Error:
       type: object
-      description: RFC 9457 problem document with `code` and `errors` extensions.
-      required: [type, title, status, code, detail, instance]
+      description: 'Body of every error response: {"error": {"code", "message", "details"}}.'
+      required: [error]
       properties:
-        type: { type: string, const: about:blank }
-        title: { type: string }
-        status: { type: integer }
-        code:
-          type: string
-          enum: [malformed_json, unauthorized, forbidden, not_found, conflict, validation_failed, internal_error]
-        detail: { type: string }
-        instance: { type: string, description: Request path }
-        errors:
-          type: array
-          description: Present only for `validation_failed`; lists every invalid field.
-          items: { $ref: "#/components/schemas/FieldError" }
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+              enum: [malformed_json, unauthorized, forbidden, not_found, conflict, validation_failed, internal_error]
+            message: { type: string, description: Human-readable explanation }
+            details:
+              type: array
+              description: Every invalid field of a `validation_failed` error; empty for other errors.
+              items: { $ref: "#/components/schemas/FieldError" }
 
   responses:
     MalformedJSON:
       description: The body is not valid JSON
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Malformed JSON
-            status: 400
-            code: malformed_json
-            detail: Request body is not valid JSON
-            instance: /api/v1/auth/login
+            error:
+              code: malformed_json
+              message: Request body is not valid JSON
+              details: []
     Unauthorized:
       description: Missing, invalid or expired bearer token
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Unauthorized
-            status: 401
-            code: unauthorized
-            detail: Token has expired
-            instance: /api/v1/users/me
+            error:
+              code: unauthorized
+              message: Token has expired
+              details: []
     NotFound:
       description: The account behind a still-valid token no longer exists
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     ValidationFailed:
       description: A field is missing, has the wrong type or breaks a rule; every broken rule is listed
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Validation failed
-            status: 422
-            code: validation_failed
-            detail: 2 fields are invalid
-            instance: /api/v1/auth/register
-            errors:
-              - { field: email, code: invalid_format, message: Must be an email address }
-              - { field: password, code: too_short, message: Must be at least 8 characters }
+            error:
+              code: validation_failed
+              message: 2 fields are invalid
+              details:
+                - { field: email, code: invalid_format, message: Must be an email address }
+                - { field: password, code: too_short, message: Must be at least 8 characters }

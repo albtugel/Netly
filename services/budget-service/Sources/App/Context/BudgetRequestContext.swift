@@ -37,7 +37,7 @@ extension JSONEncoder {
 }
 
 extension Request {
-    /// Decodes the JSON body and lets `DecodingError` reach `ProblemErrorMiddleware` unchanged,
+    /// Decodes the JSON body and lets `DecodingError` reach `APIErrorMiddleware` unchanged,
     /// so a bad field becomes `422` with its name instead of a generic `400`.
     func decodeJSON<Value: Decodable>(as type: Value.Type, context: some RequestContext) async throws -> Value {
         let buffer = try await body.collect(upTo: context.maxUploadSize)

@@ -51,9 +51,10 @@ enum TestSupport {
         return try await keys.sign(AccessTokenPayload(userID: userID, role: role, issuedAt: issuedAt))
     }
 
-    static func problem(_ response: TestingHTTPResponse) throws -> ProblemDetails {
-        #expect(response.headers.contentType?.description == "application/problem+json")
-        return try JSONDecoder().decode(ProblemDetails.self, from: response.body)
+    /// The `error` object of an error response.
+    static func errorBody(_ response: TestingHTTPResponse) throws -> ErrorEnvelope.Body {
+        #expect(response.headers.contentType == .json)
+        return try JSONDecoder().decode(ErrorEnvelope.self, from: response.body).error
     }
 }
 

@@ -49,7 +49,7 @@ func buildRouter(
     clock: @escaping @Sendable () -> Date = { Date() }
 ) -> Router<BudgetRequestContext> {
     let router = Router(context: BudgetRequestContext.self)
-    router.add(middleware: ProblemErrorMiddleware())
+    router.add(middleware: APIErrorMiddleware())
 
     router.get("health") { _, _ in
         HealthResponse(status: "ok", service: serviceName)

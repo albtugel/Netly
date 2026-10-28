@@ -38,8 +38,8 @@ import Testing
         try await TestSupport.apiApplication().test(.router) { client in
             let response = try await APIClient(client: client, token: token).send(.post, "/api/v1/debts", json: body)
             #expect(response.status == .unprocessableContent)
-            let problem = try TestSupport.problem(from: response)
-            #expect(problem.errors == [
+            let failure = try TestSupport.errorBody(from: response)
+            #expect(failure.details == [
                 FieldError(field: "amount", code: "must_be_positive", message: "Must be greater than 0"),
                 FieldError(field: "dueDate", code: "must_be_in_future", message: "Must be after 2026-09-26"),
             ])

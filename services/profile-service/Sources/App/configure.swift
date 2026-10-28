@@ -35,9 +35,9 @@ func configure(_ app: Application, configuration: AppConfiguration) async throws
     ContentConfiguration.global.use(encoder: encoder, for: .json)
     ContentConfiguration.global.use(decoder: decoder, for: .json)
 
-    // Replaces Vapor's ErrorMiddleware so every error leaves the service as application/problem+json.
+    // Replaces Vapor's ErrorMiddleware so every error leaves the service in the same envelope as Budget Service.
     app.middleware = Middlewares()
-    app.middleware.use(ProblemErrorMiddleware())
+    app.middleware.use(APIErrorMiddleware())
 
     try routes(app)
 }
