@@ -15,16 +15,32 @@ services:
       interval: 5s
       retries: 10
 
+  # One-shot: creates or updates the users table, then exits. `profile` starts only after it succeeds.
+  profile-migrate:
+    build: ./services/profile-service
+    image: netly-profile
+    command: ["migrate", "--yes"]
+    environment: &profile-database
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: netly_profile
+      DB_USER: ${DB_USER:-netly}
+      DB_PASSWORD: ${DB_PASSWORD:-netly}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   profile:
     build: ./services/profile-service
+    image: netly-profile
     environment:
-      DATABASE_URL: postgres://netly:netly@postgres:5432/netly_profile
+      <<: *profile-database
       JWT_SECRET: ${JWT_SECRET:-netly-dev-jwt-secret-change-me-32bytes}
     ports:
       - "8081:8081"
     depends_on:
-      postgres:
-        condition: service_healthy
+      profile-migrate:
+        condition: service_completed_successfully
 
   # One-shot: applies pending migrations, then exits. `budget` starts only after it succeeds.
   budget-migrate:

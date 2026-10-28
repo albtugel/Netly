@@ -1,11 +1,13 @@
-FROM swift:6.0-noble AS build
+FROM swift:6.2-noble AS build
 WORKDIR /build
 
 COPY Package.swift ./
 RUN swift package resolve
 
+# Tests are copied because the manifest declares a test target; only the App product is built.
 COPY Sources ./Sources
-RUN swift build -c release --static-swift-stdlib
+COPY Tests ./Tests
+RUN swift build -c release --static-swift-stdlib --product App
 
 FROM ubuntu:noble
 RUN apt-get update && apt-get install -y ca-certificates tzdata \
@@ -16,3 +18,4 @@ COPY --from=build /build/.build/release/App ./App
 
 EXPOSE 8081
 ENTRYPOINT ["./App"]
+CMD ["serve", "--env", "production"]
