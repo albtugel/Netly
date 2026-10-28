@@ -24,7 +24,7 @@ All examples below are real responses from the service running against PostgreSQ
 
 Every `/api/v1` route needs `Authorization: Bearer <jwt>`. The token is HS256-signed with the `JWT_SECRET` shared with Profile Service (at least 32 bytes). It carries the user id in `sub` and an expiry in `exp`. Only `GET /health` is public.
 
-Profile Service will issue tokens. Until then, mint a development token with the default compose secret:
+Tokens come from Profile Service (`POST http://localhost:8081/api/v1/auth/login`, see [`profile-service.openapi.yaml`](profile-service.openapi.yaml)); they also carry `role` and `iat`, which Budget Service does not need. To call Budget Service without Profile Service, mint a development token with the default compose secret:
 
 ```bash
 TOKEN=$(scripts/dev-token.sh)                                        # random user, valid for 24 h
