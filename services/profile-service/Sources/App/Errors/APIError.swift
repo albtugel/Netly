@@ -1,40 +1,39 @@
 import Foundation
 import Vapor
 
-/// A single invalid field reported inside a `validation_failed` problem.
+/// A single invalid field reported inside a `validation_failed` error.
 struct FieldError: Codable, Equatable, Sendable {
     let field: String
     let code: String
     let message: String
 }
 
-/// Error type for every expected failure. `ProblemErrorMiddleware` renders it as `application/problem+json`,
+/// Error type for every expected failure. `APIErrorMiddleware` renders it as an `ErrorEnvelope`,
 /// in the same shape as Budget Service.
 struct APIError: Error, Equatable, Sendable {
     let status: HTTPResponseStatus
     let code: String
-    let title: String
-    let detail: String
+    let message: String
     var fieldErrors: [FieldError] = []
 
-    static func malformedJSON(_ detail: String = "Request body is not valid JSON") -> APIError {
-        APIError(status: .badRequest, code: "malformed_json", title: "Malformed JSON", detail: detail)
+    static func malformedJSON(_ message: String = "Request body is not valid JSON") -> APIError {
+        APIError(status: .badRequest, code: "malformed_json", message: message)
     }
 
-    static func unauthorized(_ detail: String) -> APIError {
-        APIError(status: .unauthorized, code: "unauthorized", title: "Unauthorized", detail: detail)
+    static func unauthorized(_ message: String) -> APIError {
+        APIError(status: .unauthorized, code: "unauthorized", message: message)
     }
 
-    static func forbidden(_ detail: String) -> APIError {
-        APIError(status: .forbidden, code: "forbidden", title: "Forbidden", detail: detail)
+    static func forbidden(_ message: String) -> APIError {
+        APIError(status: .forbidden, code: "forbidden", message: message)
     }
 
-    static func notFound(_ detail: String) -> APIError {
-        APIError(status: .notFound, code: "not_found", title: "Not found", detail: detail)
+    static func notFound(_ message: String) -> APIError {
+        APIError(status: .notFound, code: "not_found", message: message)
     }
 
-    static func conflict(_ detail: String) -> APIError {
-        APIError(status: .conflict, code: "conflict", title: "Conflict", detail: detail)
+    static func conflict(_ message: String) -> APIError {
+        APIError(status: .conflict, code: "conflict", message: message)
     }
 
     static func validationFailed(_ fieldErrors: [FieldError]) -> APIError {
@@ -42,8 +41,7 @@ struct APIError: Error, Equatable, Sendable {
         return APIError(
             status: .unprocessableEntity,
             code: "validation_failed",
-            title: "Validation failed",
-            detail: "\(fieldErrors.count) \(noun) invalid",
+            message: "\(fieldErrors.count) \(noun) invalid",
             fieldErrors: fieldErrors
         )
     }
@@ -51,8 +49,7 @@ struct APIError: Error, Equatable, Sendable {
     static let internalError = APIError(
         status: .internalServerError,
         code: "internal_error",
-        title: "Internal server error",
-        detail: "An unexpected error occurred"
+        message: "An unexpected error occurred"
     )
 }
 

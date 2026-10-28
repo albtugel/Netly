@@ -59,7 +59,7 @@ set -a && . ../../.env && set +a && swift test
 
 ## Errors
 
-Every error is returned as `application/problem+json` (RFC 9457) with two extensions: a stable machine-readable `code` and, for validation failures, an `errors` array with one entry per invalid field. Validation collects all violations of a request instead of stopping at the first one.
+Every error is returned as `{"error": {"code": …, "message": …, "details": […]}}`: a stable machine-readable `code`, a human-readable `message` and, for validation failures, `details` with one entry per invalid field. Validation collects all violations of a request instead of stopping at the first one.
 
 ```json
 {

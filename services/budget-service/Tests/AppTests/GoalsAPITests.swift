@@ -28,10 +28,10 @@ import Testing
         let body = #"{"name": "Car", "targetAmount": 100, "savedAmount": 150, "targetDate": "2020-01-01", "priority": 11}"#
         try await TestSupport.apiApplication().test(.router) { client in
             let response = try await APIClient(client: client, token: token).send(.post, "/api/v1/goals", json: body)
-            let problem = try TestSupport.problem(from: response)
-            #expect(problem.detail == "3 fields are invalid")
-            #expect(problem.errors?.map(\.code) == ["exceeds_target", "must_be_in_future", "out_of_range"])
-            #expect(problem.errors?.map(\.field) == ["savedAmount", "targetDate", "priority"])
+            let failure = try TestSupport.errorBody(from: response)
+            #expect(failure.message == "3 fields are invalid")
+            #expect(failure.details.map(\.code) == ["exceeds_target", "must_be_in_future", "out_of_range"])
+            #expect(failure.details.map(\.field) == ["savedAmount", "targetDate", "priority"])
         }
     }
 
@@ -40,8 +40,8 @@ import Testing
         let body = #"{"name": "Car", "targetAmount": 100, "savedAmount": 150.555, "targetDate": "2028-01-01", "priority": 5}"#
         try await TestSupport.apiApplication().test(.router) { client in
             let response = try await APIClient(client: client, token: token).send(.post, "/api/v1/goals", json: body)
-            let problem = try TestSupport.problem(from: response)
-            #expect(problem.errors == [FieldError(field: "savedAmount", code: "too_precise", message: "Must have at most 2 decimal places")])
+            let failure = try TestSupport.errorBody(from: response)
+            #expect(failure.details == [FieldError(field: "savedAmount", code: "too_precise", message: "Must have at most 2 decimal places")])
         }
     }
 
@@ -53,7 +53,7 @@ import Testing
             #expect(goal.requiredMonthlyContribution == 100)
 
             let tooMuch = try await api.send(.patch, "/api/v1/goals/\(goal.id)", json: #"{"savedAmount": 1600}"#)
-            #expect(try TestSupport.problem(from: tooMuch).errors?.first?.code == "exceeds_target")
+            #expect(try TestSupport.errorBody(from: tooMuch).details.first?.code == "exceeds_target")
 
             let completed = try await api.send(.patch, "/api/v1/goals/\(goal.id)", json: #"{"savedAmount": 1500, "status": "completed"}"#)
             #expect(completed.status == .ok)
@@ -89,7 +89,7 @@ import Testing
             #expect(page.total == 1)
 
             let invalid = try await api.send(.get, "/api/v1/goals?status=done")
-            #expect(try TestSupport.problem(from: invalid).errors == [
+            #expect(try TestSupport.errorBody(from: invalid).details == [
                 FieldError(field: "status", code: "invalid_value", message: "Must be one of: active, completed, archived")
             ])
         }

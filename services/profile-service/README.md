@@ -27,7 +27,7 @@ swift run App make-admin a@netly.kz  # выдать роль admin сущест�
 | GET   | `/api/v1/users/me`      | user, admin  | Аккаунт владельца токена                           |
 | GET   | `/api/v1/admin/users`   | admin        | Все аккаунты постранично; `user` получает `403`    |
 
-Контракт: [`docs/api/profile-service.openapi.yaml`](../../docs/api/profile-service.openapi.yaml). Ошибки — `application/problem+json` в том же формате, что у Budget Service.
+Контракт: [`docs/api/profile-service.openapi.yaml`](../../docs/api/profile-service.openapi.yaml). Ошибки — `{"error": {"code": …, "message": …, "details": […]}}`, как у Budget Service.
 
 ## Пароли и токены
 

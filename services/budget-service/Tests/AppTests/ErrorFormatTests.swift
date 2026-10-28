@@ -39,16 +39,14 @@ private func probeApplication() async -> some ApplicationProtocol {
 }
 
 @Suite struct ErrorFormatTests {
-    @Test func unknownRouteIsProblemNotFound() async throws {
+    @Test func unknownRouteIsNotFound() async throws {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/nope", method: .get) { response in
                 #expect(response.status == .notFound)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.code == "not_found")
-                #expect(problem.status == 404)
-                #expect(problem.instance == "/nope")
-                #expect(problem.errors == nil)
-                #expect(String(buffer: response.body).contains(#""instance":"/nope""#))
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.code == "not_found")
+                #expect(failure.details.isEmpty)
+                #expect(String(buffer: response.body).hasPrefix(#"{"error":{"code":"not_found","details":[],"message":"#))
             }
         }
     }
@@ -57,8 +55,8 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/echo", method: .post, body: ByteBuffer(json: "{ not json")) { response in
                 #expect(response.status == .badRequest)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.code == "malformed_json")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.code == "malformed_json")
             }
         }
     }
@@ -68,9 +66,9 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/echo", method: .post, body: ByteBuffer(json: body)) { response in
                 #expect(response.status == .unprocessableContent)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.code == "validation_failed")
-                #expect(problem.errors == [FieldError(field: "name", code: "required", message: "Field is required")])
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.code == "validation_failed")
+                #expect(failure.details == [FieldError(field: "name", code: "required", message: "Field is required")])
             }
         }
     }
@@ -79,9 +77,9 @@ private func probeApplication() async -> some ApplicationProtocol {
         let body = #"{"name": "x", "amount": "ten", "date": "2030-01-01", "color": "red"}"#
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/echo", method: .post, body: ByteBuffer(json: body)) { response in
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.errors?.first?.field == "amount")
-                #expect(problem.errors?.first?.code == "invalid_type")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.details.first?.field == "amount")
+                #expect(failure.details.first?.code == "invalid_type")
             }
         }
     }
@@ -90,8 +88,8 @@ private func probeApplication() async -> some ApplicationProtocol {
         let body = #"{"name": "x", "amount": 1, "date": "2030-01-01", "color": "blue"}"#
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/echo", method: .post, body: ByteBuffer(json: body)) { response in
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.errors == [FieldError(field: "color", code: "invalid_value", message: "Must be one of: red, green")])
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.details == [FieldError(field: "color", code: "invalid_value", message: "Must be one of: red, green")])
             }
         }
     }
@@ -100,9 +98,9 @@ private func probeApplication() async -> some ApplicationProtocol {
         let body = #"{"name": "x", "amount": 1, "date": "2030-02-30", "color": "red"}"#
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/echo", method: .post, body: ByteBuffer(json: body)) { response in
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.errors?.first?.field == "date")
-                #expect(problem.errors?.first?.code == "invalid_value")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.details.first?.field == "date")
+                #expect(failure.details.first?.code == "invalid_value")
             }
         }
     }
@@ -112,9 +110,9 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/echo", method: .post, body: ByteBuffer(json: body)) { response in
                 #expect(response.status == .unprocessableContent)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.detail == "2 fields are invalid")
-                #expect(problem.errors?.map(\.code) == ["blank", "too_precise"])
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.message == "2 fields are invalid")
+                #expect(failure.details.map(\.code) == ["blank", "too_precise"])
             }
         }
     }
@@ -123,9 +121,10 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/boom", method: .get) { response in
                 #expect(response.status == .internalServerError)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.code == "internal_error")
-                #expect(problem.detail == "An unexpected error occurred")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.code == "internal_error")
+                #expect(failure.message == "An unexpected error occurred")
+                #expect(!String(buffer: response.body).contains("CancellationError"))
             }
         }
     }
@@ -134,9 +133,9 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/secure/me", method: .get) { response in
                 #expect(response.status == .unauthorized)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.code == "unauthorized")
-                #expect(problem.detail == "Missing bearer token")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.code == "unauthorized")
+                #expect(failure.message == "Missing bearer token")
             }
         }
     }
@@ -146,8 +145,8 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/secure/me", method: .get, headers: TestSupport.authHeaders(token)) { response in
                 #expect(response.status == .unauthorized)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.detail == "Token has expired")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.message == "Token has expired")
             }
         }
     }
@@ -157,8 +156,8 @@ private func probeApplication() async -> some ApplicationProtocol {
         try await probeApplication().test(.router) { client in
             try await client.execute(uri: "/secure/me", method: .get, headers: TestSupport.authHeaders(token)) { response in
                 #expect(response.status == .unauthorized)
-                let problem = try TestSupport.problem(from: response)
-                #expect(problem.detail == "Invalid token")
+                let failure = try TestSupport.errorBody(from: response)
+                #expect(failure.message == "Invalid token")
             }
         }
     }

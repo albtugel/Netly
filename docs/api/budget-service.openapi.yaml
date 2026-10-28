@@ -8,7 +8,7 @@ info:
     * Every `/api/v1` route requires a bearer JWT (HS256) issued by Profile Service. The `sub` claim is the user id.
     * Records are scoped to the token's user. Another user's record answers `404`, the same as a missing one.
     * Money is a JSON number with at most two decimal places. Dates are `YYYY-MM-DD`; timestamps are ISO 8601 UTC.
-    * Every error is `application/problem+json` (RFC 9457) with a machine-readable `code` and, on validation errors, an `errors` array.
+    * Every error is `{"error": {"code": …, "message": …, "details": […]}}` with a machine-readable `code`; `details` lists every invalid field of a validation error.
     * `PATCH` merges the given fields into the stored record and re-validates the result. Absent or `null` fields keep their value.
 servers:
   - url: http://localhost:8082
@@ -655,23 +655,24 @@ components:
             - must_be_in_future
             - exceeds_target
         message: { type: string, example: Must be greater than 0 }
-    Problem:
+    Error:
       type: object
-      description: RFC 9457 problem document with `code` and `errors` extensions.
-      required: [type, title, status, code, detail, instance]
+      description: 'Body of every error response: {"error": {"code", "message", "details"}}.'
+      required: [error]
       properties:
-        type: { type: string, const: about:blank }
-        title: { type: string }
-        status: { type: integer }
-        code:
-          type: string
-          enum: [malformed_json, unauthorized, not_found, conflict, validation_failed, internal_error]
-        detail: { type: string }
-        instance: { type: string, description: Request path }
-        errors:
-          type: array
-          description: Present only for `validation_failed`; lists every invalid field.
-          items: { $ref: "#/components/schemas/FieldError" }
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+              enum: [malformed_json, unauthorized, not_found, conflict, validation_failed, internal_error]
+            message: { type: string, description: Human-readable explanation }
+            details:
+              type: array
+              description: Every invalid field of a `validation_failed` error; empty for other errors.
+              items: { $ref: "#/components/schemas/FieldError" }
 
   examples:
     Subscription:
@@ -689,63 +690,52 @@ components:
     MalformedJSON:
       description: The body is not valid JSON
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Malformed JSON
-            status: 400
-            code: malformed_json
-            detail: Request body is not valid JSON
-            instance: /api/v1/subscriptions
+            error:
+              code: malformed_json
+              message: Request body is not valid JSON
+              details: []
     Unauthorized:
       description: Missing, invalid or expired bearer token
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Unauthorized
-            status: 401
-            code: unauthorized
-            detail: Missing bearer token
-            instance: /api/v1/subscriptions
+            error:
+              code: unauthorized
+              message: Missing bearer token
+              details: []
     NotFound:
       description: No such record for this user
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Not found
-            status: 404
-            code: not_found
-            detail: Subscription 0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21 was not found
-            instance: /api/v1/subscriptions/0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21
+            error:
+              code: not_found
+              message: Subscription 0b7d4f3e-6c1a-4f55-9d0e-2f1c8a9b7e21 was not found
+              details: []
     Conflict:
       description: A record with the same unique key already exists, e.g. a subscription with the same name (case-insensitive)
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Conflict
-            status: 409
-            code: conflict
-            detail: A subscription with the same name already exists
-            instance: /api/v1/subscriptions
+            error:
+              code: conflict
+              message: A subscription with the same name already exists
+              details: []
     ValidationFailed:
       description: A field is missing, has the wrong type or breaks a rule
       content:
-        application/problem+json:
-          schema: { $ref: "#/components/schemas/Problem" }
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
           example:
-            type: about:blank
-            title: Validation failed
-            status: 422
-            code: validation_failed
-            detail: 2 fields are invalid
-            instance: /api/v1/subscriptions
-            errors:
-              - { field: name, code: blank, message: Must not be blank }
-              - { field: price, code: must_be_positive, message: Must be greater than 0 }
+            error:
+              code: validation_failed
+              message: 2 fields are invalid
+              details:
+                - { field: name, code: blank, message: Must not be blank }
+                - { field: price, code: must_be_positive, message: Must be greater than 0 }

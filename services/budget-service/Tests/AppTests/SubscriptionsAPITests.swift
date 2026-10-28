@@ -35,8 +35,8 @@ import Testing
             let response = try await APIClient(client: client, token: token).send(.post, "/api/v1/subscriptions", json: body)
             #expect(response.status == .unprocessableContent)
             // The enum fails while decoding, before business rules run, so it is reported on its own.
-            let problem = try TestSupport.problem(from: response)
-            #expect(problem.errors == [
+            let failure = try TestSupport.errorBody(from: response)
+            #expect(failure.details == [
                 FieldError(field: "billingCycle", code: "invalid_value", message: "Must be one of: weekly, monthly, quarterly, yearly")
             ])
         }
@@ -44,9 +44,9 @@ import Testing
         let rulesBody = #"{"name": "", "price": 0, "billingCycle": "monthly", "nextChargeDate": "2026-10-15"}"#
         try await TestSupport.apiApplication().test(.router) { client in
             let response = try await APIClient(client: client, token: token).send(.post, "/api/v1/subscriptions", json: rulesBody)
-            let problem = try TestSupport.problem(from: response)
-            #expect(problem.errors?.map(\.field) == ["name", "price"])
-            #expect(problem.errors?.map(\.code) == ["blank", "must_be_positive"])
+            let failure = try TestSupport.errorBody(from: response)
+            #expect(failure.details.map(\.field) == ["name", "price"])
+            #expect(failure.details.map(\.code) == ["blank", "must_be_positive"])
         }
     }
 
@@ -74,11 +74,11 @@ import Testing
         let token = try await TestSupport.token()
         try await TestSupport.apiApplication().test(.router) { client in
             let api = APIClient(client: client, token: token)
-            let outOfRange = try TestSupport.problem(from: try await api.send(.get, "/api/v1/subscriptions?limit=0&offset=-1"))
-            #expect(outOfRange.errors?.map(\.field) == ["limit", "offset"])
+            let outOfRange = try TestSupport.errorBody(from: try await api.send(.get, "/api/v1/subscriptions?limit=0&offset=-1"))
+            #expect(outOfRange.details.map(\.field) == ["limit", "offset"])
 
-            let notNumber = try TestSupport.problem(from: try await api.send(.get, "/api/v1/subscriptions?limit=ten"))
-            #expect(notNumber.errors == [FieldError(field: "limit", code: "invalid_type", message: "Expected integer")])
+            let notNumber = try TestSupport.errorBody(from: try await api.send(.get, "/api/v1/subscriptions?limit=ten"))
+            #expect(notNumber.details == [FieldError(field: "limit", code: "invalid_type", message: "Expected integer")])
         }
     }
 
@@ -94,8 +94,8 @@ import Testing
 
             let foreign = try await APIClient(client: client, token: strangerToken).send(.get, "/api/v1/subscriptions/\(id)")
             #expect(foreign.status == .notFound)
-            let problem = try TestSupport.problem(from: foreign)
-            #expect(problem.detail == "Subscription \(id) was not found")
+            let failure = try TestSupport.errorBody(from: foreign)
+            #expect(failure.message == "Subscription \(id) was not found")
         }
     }
 
@@ -104,7 +104,7 @@ import Testing
         try await TestSupport.apiApplication().test(.router) { client in
             let response = try await APIClient(client: client, token: token).send(.get, "/api/v1/subscriptions/42")
             #expect(response.status == .unprocessableContent)
-            #expect(try TestSupport.problem(from: response).errors?.first?.field == "id")
+            #expect(try TestSupport.errorBody(from: response).details.first?.field == "id")
         }
     }
 
@@ -130,7 +130,7 @@ import Testing
 
             let response = try await api.send(.patch, "/api/v1/subscriptions/\(id)", json: #"{"name": " ", "price": 2000000}"#)
             #expect(response.status == .unprocessableContent)
-            #expect(try TestSupport.problem(from: response).errors?.map(\.code) == ["blank", "too_large"])
+            #expect(try TestSupport.errorBody(from: response).details.map(\.code) == ["blank", "too_large"])
 
             let current = try TestSupport.decode(Subscription.self, from: try await api.send(.get, "/api/v1/subscriptions/\(id)"))
             #expect(current.name == "Netflix")

@@ -33,7 +33,7 @@ import Testing
             let goal = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.post, "/api/v1/goals", json: laptop))
 
             let response = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 1200.01}"#)
-            #expect(try TestSupport.problem(from: response).errors?.map(\.code) == ["exceeds_target"])
+            #expect(try TestSupport.errorBody(from: response).details.map(\.code) == ["exceeds_target"])
 
             let page = try TestSupport.decode(Page<GoalContribution.Response>.self, from: try await api.send(.get, "/api/v1/goals/\(goal.id)/contributions"))
             #expect(page.total == 0)
@@ -47,7 +47,7 @@ import Testing
             let goal = try TestSupport.decode(GoalFields.Response.self, from: try await api.send(.post, "/api/v1/goals", json: laptop))
 
             let response = try await api.send(.post, "/api/v1/goals/\(goal.id)/contributions", json: #"{"amount": 0, "note": "  "}"#)
-            #expect(try TestSupport.problem(from: response).errors?.map(\.field) == ["amount", "note"])
+            #expect(try TestSupport.errorBody(from: response).details.map(\.field) == ["amount", "note"])
         }
     }
 

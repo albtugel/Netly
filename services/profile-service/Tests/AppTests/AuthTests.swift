@@ -22,8 +22,8 @@ import VaporTesting
         try await TestSupport.withApp { app in
             try await app.testing().test(.GET, "api/v1/users/me") { response in
                 #expect(response.status == .unauthorized)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.detail == "Missing bearer token")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.message == "Missing bearer token")
             }
         }
     }
@@ -33,8 +33,8 @@ import VaporTesting
         try await TestSupport.withApp { app in
             try await app.testing().test(.GET, "api/v1/admin/users", headers: .bearer(forged)) { response in
                 #expect(response.status == .unauthorized)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.detail == "Invalid token")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.message == "Invalid token")
             }
         }
     }
@@ -44,8 +44,8 @@ import VaporTesting
         try await TestSupport.withApp { app in
             try await app.testing().test(.GET, "api/v1/users/me", headers: .bearer(expired)) { response in
                 #expect(response.status == .unauthorized)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.detail == "Token has expired")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.message == "Token has expired")
             }
         }
     }
@@ -55,9 +55,9 @@ import VaporTesting
         try await TestSupport.withApp { app in
             try await app.testing().test(.GET, "api/v1/admin/users", headers: .bearer(token)) { response in
                 #expect(response.status == .forbidden)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.code == "forbidden")
-                #expect(problem.detail == "Requires the admin role")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.code == "forbidden")
+                #expect(failure.message == "Requires the admin role")
             }
         }
     }
@@ -68,9 +68,9 @@ import VaporTesting
                 try request.content.encode(["email": "not-an-email", "password": "short"])
             }) { response in
                 #expect(response.status == .unprocessableEntity)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.errors?.map(\.field) == ["email", "password"])
-                #expect(problem.errors?.map(\.code) == ["invalid_format", "too_short"])
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.details.map(\.field) == ["email", "password"])
+                #expect(failure.details.map(\.code) == ["invalid_format", "too_short"])
             }
         }
     }
@@ -81,8 +81,8 @@ import VaporTesting
                 try request.content.encode(["email": "a@netly.kz", "password": String(repeating: "x", count: 73)])
             }) { response in
                 #expect(response.status == .unprocessableEntity)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.errors?.first?.code == "too_long")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.details.first?.code == "too_long")
             }
         }
     }
@@ -93,7 +93,7 @@ import VaporTesting
                 try request.content.encode(["email": "a@netly.kz"])
             }) { response in
                 #expect(response.status == .unprocessableEntity)
-                let error = try TestSupport.problem(response).errors?.first
+                let error = try TestSupport.errorBody(response).details.first
                 #expect(error?.field == "password")
                 #expect(error?.code == "required")
             }
@@ -104,18 +104,18 @@ import VaporTesting
         try await TestSupport.withApp { app in
             try await app.testing().test(.POST, "api/v1/auth/login", headers: ["Content-Type": "application/json"], body: ByteBuffer(string: "{")) { response in
                 #expect(response.status == .badRequest)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.code == "malformed_json")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.code == "malformed_json")
             }
         }
     }
 
-    @Test func unknownRouteIsProblemJSON() async throws {
+    @Test func unknownRouteUsesTheErrorEnvelope() async throws {
         try await TestSupport.withApp { app in
             try await app.testing().test(.GET, "api/v1/nope") { response in
                 #expect(response.status == .notFound)
-                let problem = try TestSupport.problem(response)
-                #expect(problem.code == "not_found")
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.code == "not_found")
             }
         }
     }
@@ -220,7 +220,7 @@ struct AccountTests {
                     try request.content.encode(["email": email, "password": password])
                 }) { response in
                     #expect(response.status == .unauthorized)
-                    details.append(try TestSupport.problem(response).detail)
+                    details.append(try TestSupport.errorBody(response).message)
                 }
             }
             #expect(details == ["Invalid email or password", "Invalid email or password"])

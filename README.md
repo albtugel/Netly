@@ -75,7 +75,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service registers users, stores bcrypt password hashes in PostgreSQL, issues 15-minute JWTs with a `user` or `admin` role and guards an admin-only route. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, and errors share one `application/problem+json` format. The API contracts are [`docs/api/profile-service.openapi.yaml`](docs/api/profile-service.openapi.yaml) and [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
+Current state: Profile Service registers users, stores bcrypt password hashes in PostgreSQL, issues 15-minute JWTs with a `user` or `admin` role and guards an admin-only route. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, and every error of both services has the same `{"error": {"code", "message", "details"}}` body. The API contracts are [`docs/api/profile-service.openapi.yaml`](docs/api/profile-service.openapi.yaml) and [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
 Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker. The Swift 6.4 toolchain from the Xcode beta cannot build the `swift-collections` 1.7.0 dependency yet; use Docker with it.
 
@@ -173,7 +173,24 @@ Profile Service owns accounts. A password is stored only as a bcrypt hash (cost 
 | Another user's budget record                | 401   | 404    | 404     |
 | `GET /admin/users`                          | 401   | 403    | yes     |
 
-Every account registers as `user`; a `role` in the request body is ignored. Grant `admin` with `docker compose run --rm profile make-admin <email>`. Details: [`services/profile-service/README.md`](services/profile-service/README.md).
+Every account registers as `user`; a `role` in the request body is ignored. Grant `admin` with `docker compose run --rm profile make-admin <email>`. Details: [`services/profile-service/README.md`](services/profile-service/README.md). The three access scenarios (no token, `user`, `admin`) are checked against the running services in [`docs/auth-check.md`](docs/auth-check.md).
+
+#### Why JWT and not a server-side session
+
+- **No shared session store.** Budget Service checks the signature and expiry itself, with the shared `JWT_SECRET`. A session would need a store that both services query on every request (Redis or a table in Profile Service's database), which adds a component and a network hop, and breaks the rule that each service reads only its own database.
+- **No cookies, no CSRF.** The client is an iOS app that sends `Authorization: Bearer`; there is no browser cookie for a cross-site request to ride on.
+- **The role travels with the token.** `RoleGuard` decides `403` from the `role` claim without a database query.
+- **The cost is revocation.** A JWT cannot be withdrawn before `exp`, while a session can be deleted at once. The token therefore lives 15 minutes; refresh tokens with revocation are planned.
+
+#### Error format
+
+Every error of both services, from validation to an unexpected exception, has one body and the matching HTTP status:
+
+```json
+{ "error": { "code": "forbidden", "message": "Requires the admin role", "details": [] } }
+```
+
+`code` is machine-readable, `message` is for people, and `details` lists every invalid field of a `validation_failed` error (empty otherwise). The full list of codes is in [`docs/api/budget-service.md`](docs/api/budget-service.md#error-format).
 
 ### Calling the API
 
@@ -213,6 +230,7 @@ netly/
 │   │   ├── profile-service.openapi.yaml  Profile Service contract (OpenAPI 3.1)
 │   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
 │   │   └── budget-service.md             validation, error format, examples
+│   ├── auth-check.md            access by role, checked against the running services
 │   ├── requirements.md          business problem, user stories, decomposition
 │   ├── database.md              Budget Service schema, constraints, indexes, migrations
 │   ├── er-diagram.png           ER diagram of netly_budget

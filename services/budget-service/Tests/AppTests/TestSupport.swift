@@ -29,9 +29,10 @@ enum TestSupport {
         [.authorization: "Bearer \(token)", .contentType: "application/json"]
     }
 
-    static func problem(from response: TestResponse) throws -> ProblemDetails {
-        #expect(response.headers[.contentType] == "application/problem+json")
-        return try JSONDecoder().decode(ProblemDetails.self, from: response.body)
+    /// The `error` object of an error response.
+    static func errorBody(from response: TestResponse) throws -> ErrorEnvelope.Body {
+        #expect(response.headers[.contentType] == "application/json; charset=utf-8")
+        return try JSONDecoder().decode(ErrorEnvelope.self, from: response.body).error
     }
 }
 
