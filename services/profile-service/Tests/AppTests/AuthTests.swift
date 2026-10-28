@@ -243,6 +243,11 @@ struct AccountTests {
                 #expect(page.items.count == 1)
                 #expect(page.items.first?.email == "admin@netly.kz")
             }
+            try await app.testing().test(.GET, "api/v1/admin/users?offset=\(Int.max)", headers: .bearer(token.accessToken)) { response in
+                #expect(response.status == .ok)
+                let page = try response.content.decode(AdminController.Page.self)
+                #expect(page.items.isEmpty)
+            }
         }
     }
 }

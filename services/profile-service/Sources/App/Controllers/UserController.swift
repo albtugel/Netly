@@ -38,7 +38,9 @@ struct AdminController: RouteCollection {
         let users = try await User.query(on: request.db)
             .sort(\.$createdAt)
             .sort(\.$id)
-            .range(offset..<(offset + limit))
+            // offset and limit separately: a range would trap on offset + limit overflowing for a huge offset.
+            .offset(offset)
+            .limit(limit)
             .all()
         return Page(items: try users.map { try $0.response() }, limit: limit, offset: offset, total: total)
     }
