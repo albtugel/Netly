@@ -12,7 +12,7 @@
 
 ```
 Репозиторий: https://github.com/albtugel/Netly
-Ветка: feat/profile-auth, коммит 15255c2
+Ветка: main, коммит 86b0ed7
 Презентация и текст доклада: docs/srs1/
 ```
 
