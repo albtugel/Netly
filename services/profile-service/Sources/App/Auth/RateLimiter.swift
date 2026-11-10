@@ -24,9 +24,12 @@ actor RateLimiter {
             lastSweep = current
         }
         guard let entry = windows[key], current.timeIntervalSince(entry.start) < window else {
-            if windows[key] == nil, windows.count >= maximumTrackedKeys,
-               let oldest = windows.min(by: { $0.value.start < $1.value.start })?.key {
-                windows[oldest] = nil
+            if windows[key] == nil, windows.count >= maximumTrackedKeys {
+                let unblocked = windows.filter { $0.value.count < limit }
+                let candidates = unblocked.isEmpty ? windows : unblocked
+                if let oldest = candidates.min(by: { $0.value.start < $1.value.start })?.key {
+                    windows[oldest] = nil
+                }
             }
             windows[key] = (current, 1)
             return nil
@@ -54,9 +57,10 @@ struct RateLimitMiddleware: AsyncMiddleware {
         guard case .v6(let v6)? = address else {
             return address?.ipAddress ?? "unknown"
         }
-        let prefix = withUnsafeBytes(of: v6.address.sin6_addr) { bytes in
-            bytes.prefix(8).map { String(format: "%02x", $0) }.joined()
+        let bytes = withUnsafeBytes(of: v6.address.sin6_addr) { Array($0) }
+        if bytes[0..<10].allSatisfy({ $0 == 0 }), bytes[10] == 0xff, bytes[11] == 0xff {
+            return bytes[12...].map(String.init).joined(separator: ".")
         }
-        return "\(prefix)/64"
+        return bytes.prefix(8).map { String(format: "%02x", $0) }.joined() + "/64"
     }
 }

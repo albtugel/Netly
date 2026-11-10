@@ -239,7 +239,7 @@ Measured on 2026-11-10 with `./scripts/test.sh` (all 97 tests passing, database 
 
 | Service | Lines | Functions | Regions |
 | ------- | ----- | --------- | ------- |
-| Profile Service | 88.0% (381 of 433) | 84.2% | 78.4% |
+| Profile Service | 87.9% (385 of 438) | 83.5% | 78.4% |
 | Budget Service | 91.7% (1200 of 1309) | 89.0% | 84.7% |
 
 Where coverage is low, and why:

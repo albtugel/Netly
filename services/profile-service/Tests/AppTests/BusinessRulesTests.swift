@@ -93,15 +93,15 @@ import Vapor
         #expect(await limiter.acquire("login 10.0.0.1") == nil)
     }
 
-    @Test func newClientEvictsTheOldestWhileTheTableIsFull() async {
+    @Test func fullTableEvictsAClientThatIsNotBlocked() async {
         let clock = Clock()
-        let limiter = RateLimiter(limit: 1, window: 60, maximumTrackedKeys: 2, now: { clock.now })
+        let limiter = RateLimiter(limit: 2, window: 60, maximumTrackedKeys: 2, now: { clock.now })
+        #expect(await limiter.acquire("login 10.0.0.1") == nil)
         #expect(await limiter.acquire("login 10.0.0.1") == nil)
         clock.now += 1
         #expect(await limiter.acquire("login 10.0.0.2") == nil)
         #expect(await limiter.acquire("login 10.0.0.3") == nil)
-        #expect(await limiter.acquire("login 10.0.0.2") != nil)
-        #expect(await limiter.acquire("login 10.0.0.1") == nil)
+        #expect(await limiter.acquire("login 10.0.0.1") != nil)
     }
 
     @Test func ipv6ClientsShareTheirSlash64() throws {
@@ -111,6 +111,7 @@ import Vapor
         #expect(RateLimitMiddleware.clientKey(first) == RateLimitMiddleware.clientKey(second))
         #expect(RateLimitMiddleware.clientKey(first) != RateLimitMiddleware.clientKey(otherNetwork))
         #expect(RateLimitMiddleware.clientKey(try SocketAddress(ipAddress: "10.0.0.1", port: 0)) == "10.0.0.1")
+        #expect(RateLimitMiddleware.clientKey(try SocketAddress(ipAddress: "::ffff:10.0.0.2", port: 0)) == "10.0.0.2")
     }
 
     @Test func clientsAndRoutesAreCountedSeparately() async {
