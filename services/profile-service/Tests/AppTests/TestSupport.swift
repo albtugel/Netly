@@ -16,7 +16,8 @@ enum TestSupport {
         let environment = ProcessInfo.processInfo.environment
         let keys = AppConfiguration.requiredDatabaseVariables + ["DB_PORT"]
         let database = environment.filter { keys.contains($0.key) }
-        return AppConfiguration.requiredDatabaseVariables.allSatisfy({ database[$0] != nil }) ? database : nil
+        let complete = AppConfiguration.requiredDatabaseVariables.allSatisfy { database[$0] != nil }
+        return complete && database["DB_NAME"]?.hasSuffix("_test") == true ? database : nil
     }()
 
     static var hasDatabase: Bool { databaseEnvironment != nil }

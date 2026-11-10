@@ -24,8 +24,10 @@ struct AuthController: RouteCollection {
         let expiresIn: Int
     }
 
+    let rateLimit = RateLimitMiddleware(limiter: RateLimiter(limit: 10, window: 60))
+
     func boot(routes: any RoutesBuilder) throws {
-        let auth = routes.grouped("auth")
+        let auth = routes.grouped("auth").grouped(rateLimit)
         auth.post("register", use: register)
         auth.post("login", use: login)
     }

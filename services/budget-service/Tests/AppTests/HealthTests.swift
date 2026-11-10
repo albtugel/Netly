@@ -40,3 +40,34 @@ import Testing
         #expect(configuration.jwtSecret == AppConfiguration.developmentJWTSecret)
     }
 }
+
+@Suite struct ProtectedRoutesTests {
+    static let id = UUID().uuidString
+
+    @Test(arguments: [
+        (HTTPRequest.Method.get, "/api/v1/subscriptions"),
+        (.post, "/api/v1/subscriptions"),
+        (.get, "/api/v1/subscriptions/\(id)"),
+        (.patch, "/api/v1/subscriptions/\(id)"),
+        (.delete, "/api/v1/subscriptions/\(id)"),
+        (.get, "/api/v1/debts"),
+        (.post, "/api/v1/debts"),
+        (.get, "/api/v1/debts/\(id)"),
+        (.patch, "/api/v1/debts/\(id)"),
+        (.delete, "/api/v1/debts/\(id)"),
+        (.get, "/api/v1/goals"),
+        (.post, "/api/v1/goals"),
+        (.get, "/api/v1/goals/\(id)"),
+        (.patch, "/api/v1/goals/\(id)"),
+        (.delete, "/api/v1/goals/\(id)"),
+        (.get, "/api/v1/goals/\(id)/contributions"),
+        (.post, "/api/v1/goals/\(id)/contributions"),
+    ])
+    func everyBudgetRouteRequiresAToken(method: HTTPRequest.Method, path: String) async throws {
+        try await TestSupport.apiApplication().test(.router) { client in
+            let response = try await client.execute(uri: path, method: method, body: ByteBuffer(json: "{}"))
+            #expect(response.status == .unauthorized)
+            #expect(try TestSupport.errorBody(from: response).code == "unauthorized")
+        }
+    }
+}

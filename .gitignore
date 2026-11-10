@@ -2,6 +2,11 @@
 .build/
 .swiftpm/
 Package.resolved
-*.xcodeproj/xcuserdata/
 xcuserdata/
 .env
+.env.*
+!.env.example
+coverage/
+*.docx
+*.pptx
+*.pdf

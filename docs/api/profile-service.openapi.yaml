@@ -76,6 +76,7 @@ paths:
                   message: An account with this email already exists
                   details: []
         "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/auth/login:
     post:
@@ -106,6 +107,7 @@ paths:
                   message: Invalid email or password
                   details: []
         "422": { $ref: "#/components/responses/ValidationFailed" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
 
   /api/v1/users/me:
     get:
@@ -250,6 +252,20 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    TooManyRequests:
+      description: More than 10 requests to this route from one IP address within a minute
+      headers:
+        Retry-After:
+          description: Seconds until the next request is accepted
+          schema: { type: integer, minimum: 1 }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: too_many_requests
+              message: Too many attempts, retry in 42 s
+              details: []
     ValidationFailed:
       description: A field is missing, has the wrong type or breaks a rule; every broken rule is listed
       content:

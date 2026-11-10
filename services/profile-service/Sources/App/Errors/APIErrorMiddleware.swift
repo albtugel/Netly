@@ -47,10 +47,10 @@ struct APIErrorMiddleware: AsyncMiddleware {
         let envelope = ErrorEnvelope(error: .init(code: error.code, message: error.message, details: error.fieldErrors))
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        return Response(
-            status: error.status,
-            headers: ["Content-Type": "application/json; charset=utf-8"],
-            body: .init(data: try encoder.encode(envelope))
-        )
+        var headers: HTTPHeaders = ["Content-Type": "application/json; charset=utf-8"]
+        if let retryAfter = error.retryAfterSeconds {
+            headers.add(name: "Retry-After", value: String(retryAfter))
+        }
+        return Response(status: error.status, headers: headers, body: .init(data: try encoder.encode(envelope)))
     }
 }

@@ -110,6 +110,29 @@ import VaporTesting
         }
     }
 
+    @Test func eleventhAuthAttemptInAMinuteIsTooManyRequests() async throws {
+        try await TestSupport.withApp { app in
+            for _ in 1...10 {
+                try await app.testing().test(.POST, "api/v1/auth/register", beforeRequest: { request in
+                    try request.content.encode(["email": "brute@netly.kz", "password": "short"])
+                }) { response in
+                    #expect(response.status == .unprocessableEntity)
+                }
+            }
+            try await app.testing().test(.POST, "api/v1//auth/register/", beforeRequest: { request in
+                try request.content.encode(["email": "brute@netly.kz", "password": "short"])
+            }) { response in
+                #expect(response.status == .tooManyRequests)
+                #expect(Int(response.headers.first(name: "Retry-After") ?? "") ?? 0 > 0)
+                let failure = try TestSupport.errorBody(response)
+                #expect(failure.code == "too_many_requests")
+            }
+            try await app.testing().test(.POST, "api/v1/auth/login", headers: ["Content-Type": "application/json"], body: ByteBuffer(string: "{")) { response in
+                #expect(response.status == .badRequest)
+            }
+        }
+    }
+
     @Test func unknownRouteUsesTheErrorEnvelope() async throws {
         try await TestSupport.withApp { app in
             try await app.testing().test(.GET, "api/v1/nope") { response in
