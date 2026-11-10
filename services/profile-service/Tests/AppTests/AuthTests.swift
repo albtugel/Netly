@@ -119,7 +119,7 @@ import VaporTesting
                     #expect(response.status == .unprocessableEntity)
                 }
             }
-            try await app.testing().test(.POST, "api/v1/auth/register", beforeRequest: { request in
+            try await app.testing().test(.POST, "api/v1//auth/register/", beforeRequest: { request in
                 try request.content.encode(["email": "brute@netly.kz", "password": "short"])
             }) { response in
                 #expect(response.status == .tooManyRequests)

@@ -91,6 +91,17 @@ import Testing
         #expect(await limiter.acquire("login 10.0.0.1") == nil)
     }
 
+    @Test func newClientsAreRejectedWhileTheTableIsFull() async {
+        let clock = Clock()
+        let limiter = RateLimiter(limit: 5, window: 60, maximumTrackedKeys: 2, now: { clock.now })
+        #expect(await limiter.acquire("login 10.0.0.1") == nil)
+        #expect(await limiter.acquire("login 10.0.0.2") == nil)
+        #expect(await limiter.acquire("login 10.0.0.3") == 60)
+        #expect(await limiter.acquire("login 10.0.0.1") == nil)
+        clock.now += 60
+        #expect(await limiter.acquire("login 10.0.0.3") == nil)
+    }
+
     @Test func clientsAndRoutesAreCountedSeparately() async {
         let limiter = RateLimiter(limit: 1, window: 60)
         #expect(await limiter.acquire("login 10.0.0.1") == nil)
