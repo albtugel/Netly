@@ -220,10 +220,10 @@ Without Docker networking, `swift test` inside a service directory runs every te
 
 | Kind | Profile Service | Budget Service |
 | ---- | --------------- | -------------- |
-| Unit, no network or database | 13 | 20 |
+| Unit, no network or database | 14 | 20 |
 | API through the framework's test client | 11 | 37 |
 | API and repositories against PostgreSQL | 6 | 9 |
-| Total | 30 | 66 |
+| Total | 31 | 66 |
 
 Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format.
 
@@ -235,11 +235,11 @@ Unit tests cover the business rules: email normalization and format, the 15-minu
 
 ### Coverage
 
-Measured on 2026-11-10 with `./scripts/test.sh` (all 96 tests passing, database suites included; a repeated run gives the same numbers):
+Measured on 2026-11-10 with `./scripts/test.sh` (all 97 tests passing, database suites included; a repeated run gives the same numbers):
 
 | Service | Lines | Functions | Regions |
 | ------- | ----- | --------- | ------- |
-| Profile Service | 87.6% (368 of 420) | 83.6% | 77.8% |
+| Profile Service | 88.0% (381 of 433) | 84.2% | 78.4% |
 | Budget Service | 91.7% (1200 of 1309) | 89.0% | 84.7% |
 
 Where coverage is low, and why:

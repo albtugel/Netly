@@ -1,4 +1,5 @@
 import Foundation
+import NIOCore
 import Vapor
 
 actor RateLimiter {
@@ -23,8 +24,9 @@ actor RateLimiter {
             lastSweep = current
         }
         guard let entry = windows[key], current.timeIntervalSince(entry.start) < window else {
-            guard windows[key] != nil || windows.count < maximumTrackedKeys else {
-                return window
+            if windows[key] == nil, windows.count >= maximumTrackedKeys,
+               let oldest = windows.min(by: { $0.value.start < $1.value.start })?.key {
+                windows[oldest] = nil
             }
             windows[key] = (current, 1)
             return nil
@@ -42,10 +44,19 @@ struct RateLimitMiddleware: AsyncMiddleware {
 
     func respond(to request: Request, chainingTo next: any AsyncResponder) async throws -> Response {
         let route = request.route.map { $0.path.map(\.description).joined(separator: "/") } ?? request.url.path
-        let client = request.remoteAddress?.ipAddress ?? "unknown"
-        if let wait = await limiter.acquire("\(route) \(client)") {
+        if let wait = await limiter.acquire("\(route) \(Self.clientKey(request.remoteAddress))") {
             throw APIError.tooManyRequests(retryAfterSeconds: max(1, Int(wait.rounded(.up))))
         }
         return try await next.respond(to: request)
+    }
+
+    static func clientKey(_ address: SocketAddress?) -> String {
+        guard case .v6(let v6)? = address else {
+            return address?.ipAddress ?? "unknown"
+        }
+        let prefix = withUnsafeBytes(of: v6.address.sin6_addr) { bytes in
+            bytes.prefix(8).map { String(format: "%02x", $0) }.joined()
+        }
+        return "\(prefix)/64"
     }
 }

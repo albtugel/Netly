@@ -1,5 +1,7 @@
 import Foundation
+import NIOCore
 import Testing
+import Vapor
 
 @testable import App
 
@@ -91,15 +93,24 @@ import Testing
         #expect(await limiter.acquire("login 10.0.0.1") == nil)
     }
 
-    @Test func newClientsAreRejectedWhileTheTableIsFull() async {
+    @Test func newClientEvictsTheOldestWhileTheTableIsFull() async {
         let clock = Clock()
-        let limiter = RateLimiter(limit: 5, window: 60, maximumTrackedKeys: 2, now: { clock.now })
+        let limiter = RateLimiter(limit: 1, window: 60, maximumTrackedKeys: 2, now: { clock.now })
         #expect(await limiter.acquire("login 10.0.0.1") == nil)
+        clock.now += 1
         #expect(await limiter.acquire("login 10.0.0.2") == nil)
-        #expect(await limiter.acquire("login 10.0.0.3") == 60)
-        #expect(await limiter.acquire("login 10.0.0.1") == nil)
-        clock.now += 60
         #expect(await limiter.acquire("login 10.0.0.3") == nil)
+        #expect(await limiter.acquire("login 10.0.0.2") != nil)
+        #expect(await limiter.acquire("login 10.0.0.1") == nil)
+    }
+
+    @Test func ipv6ClientsShareTheirSlash64() throws {
+        let first = try SocketAddress(ipAddress: "2001:db8:1:2:aaaa::1", port: 0)
+        let second = try SocketAddress(ipAddress: "2001:db8:1:2:bbbb::2", port: 0)
+        let otherNetwork = try SocketAddress(ipAddress: "2001:db8:1:3::1", port: 0)
+        #expect(RateLimitMiddleware.clientKey(first) == RateLimitMiddleware.clientKey(second))
+        #expect(RateLimitMiddleware.clientKey(first) != RateLimitMiddleware.clientKey(otherNetwork))
+        #expect(RateLimitMiddleware.clientKey(try SocketAddress(ipAddress: "10.0.0.1", port: 0)) == "10.0.0.1")
     }
 
     @Test func clientsAndRoutesAreCountedSeparately() async {
