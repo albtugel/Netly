@@ -9,8 +9,8 @@ SERVICES=${*:-profile budget}
 docker compose up -d --wait postgres >/dev/null
 for service in $SERVICES; do
     database="netly_${service}_test"
-    exists=$(docker compose exec -T postgres psql -U "$DB_USER" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname = '$database'")
-    [ "$exists" = 1 ] || docker compose exec -T postgres createdb -U "$DB_USER" "$database"
+    docker compose exec -T postgres dropdb -U "$DB_USER" --if-exists --force "$database"
+    docker compose exec -T postgres createdb -U "$DB_USER" "$database"
 done
 
 mkdir -p coverage
