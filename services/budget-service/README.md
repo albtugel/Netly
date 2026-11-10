@@ -51,11 +51,13 @@ swift test
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
 
-Integration tests against a real PostgreSQL run only when the `DB_*` variables are set:
+Integration tests against a real PostgreSQL run only when the `DB_*` variables are set and `DB_NAME` ends in `_test`; each test empties the tables first, so the working `netly_budget` is never touched:
 
 ```bash
-set -a && . ../../.env && set +a && swift test
+set -a && . ../../.env && set +a && DB_NAME=netly_budget_test swift test
 ```
+
+`scripts/test.sh budget` from the repository root creates the test database and writes a coverage report to `coverage/`.
 
 ## Errors
 

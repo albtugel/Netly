@@ -7,10 +7,11 @@ import Testing
 
 @testable import App
 
-private let postgresTestConfiguration = try? PostgresClient.Configuration.fromEnvironment(ProcessInfo.processInfo.environment)
+private let postgresTestConfiguration = (try? PostgresClient.Configuration.fromEnvironment(ProcessInfo.processInfo.environment))
+    .flatMap { $0.database?.hasSuffix("_test") == true ? $0 : nil }
 
 /// Runs the HTTP API against a real database. Enabled only when the `DB_*` variables are set, e.g.
-/// `DB_HOST=localhost DB_NAME=netly_budget DB_USER=netly DB_PASSWORD=netly swift test`.
+/// `DB_HOST=localhost DB_NAME=netly_budget_test DB_USER=netly DB_PASSWORD=netly swift test`.
 @Suite(.enabled(if: postgresTestConfiguration != nil), .serialized)
 struct PostgresIntegrationTests {
     /// A running client on a fully migrated database.
@@ -20,6 +21,7 @@ struct PostgresIntegrationTests {
         let running = Task { await client.run() }
         defer { running.cancel() }
         try await BudgetMigrations.apply(client: client, logger: logger)
+        try await client.query("TRUNCATE subscriptions, debts, goals, goal_contributions")
         try await body(client, logger)
     }
 
@@ -150,6 +152,24 @@ struct PostgresIntegrationTests {
             let page = try TestSupport.decode(Page<GoalFields.Response>.self, from: try await api.send(.get, "/api/v1/goals?status=active&limit=1&offset=1"))
             #expect(page.total == 2)
             #expect(page.items.map(\.name) == ["Trip"])
+        }
+    }
+
+    @Test func sqlInjectionPayloadIsStoredAsPlainText() async throws {
+        let token = try await TestSupport.token()
+        try await withPostgresAPI { client in
+            let api = APIClient(client: client, token: token)
+            let payload = "x'); DROP TABLE subscriptions; --"
+            let body = #"{"name": "\#(payload)", "price": 1, "billingCycle": "monthly", "nextChargeDate": "2026-10-01"}"#
+            let created = try TestSupport.decode(SubscriptionFields.Response.self, from: try await api.send(.post, "/api/v1/subscriptions", json: body))
+            #expect(created.name == payload)
+
+            let page = try TestSupport.decode(Page<SubscriptionFields.Response>.self, from: try await api.send(.get, "/api/v1/subscriptions"))
+            #expect(page.items.map(\.name) == [payload])
+
+            let filtered = try await api.send(.get, "/api/v1/goals?status=active%27%20OR%20%271%27=%271")
+            #expect(filtered.status == .unprocessableContent)
+            #expect(try TestSupport.errorBody(from: filtered).details.map(\.code) == ["invalid_value"])
         }
     }
 
