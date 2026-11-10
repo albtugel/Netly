@@ -113,25 +113,7 @@ swift run App                         # serves on :8082; logs the database it co
 
 ### Tests
 
-```bash
-cd services/budget-service
-swift test
-```
-
-Without a local Swift 6.2 toolchain, run the tests in the same image the Dockerfile uses:
-
-```bash
-docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
-```
-
-The suite has 55 tests covering CRUD for every resource, the status filter, goal contributions, validation rules, the error format, JWT checks, configuration and the monthly calculations. The 8 PostgreSQL integration tests (start-up connection, migration rollback, unique names, the contribution transaction and its rollback) are skipped unless the `DB_*` variables are set. To run them against the compose database:
-
-```bash
-docker compose up -d postgres
-docker run --rm --network netly_default -v "$PWD":/src -w /src \
-  -e DB_HOST=postgres -e DB_NAME=netly_budget -e DB_USER=netly -e DB_PASSWORD=netly \
-  swift:6.2-noble swift test
-```
+See [Testing](#testing) below.
 
 ### API contract
 
@@ -221,6 +203,59 @@ Response:
 { "status": "ok", "service": "netly-profile" }
 ```
 
+## Testing
+
+One command runs both services' tests in the `swift:6.2-noble` image against PostgreSQL and writes a coverage report:
+
+```bash
+./scripts/test.sh            # both services
+./scripts/test.sh profile    # one service: profile or budget
+```
+
+The script starts the compose `postgres` container, creates `netly_profile_test` and `netly_budget_test` if they are missing, runs `swift test --enable-code-coverage` and converts the result with `llvm-cov`. Reports land in `coverage/` (git-ignored): `coverage/<service>-service.txt` with per-file numbers and `coverage/<service>-service/index.html` to browse line by line.
+
+Without Docker networking, `swift test` inside a service directory runs every test that needs no database; the database suites are skipped.
+
+### What the tests cover
+
+| Kind | Profile Service | Budget Service |
+| ---- | --------------- | -------------- |
+| Unit, no network or database | 12 | 20 |
+| API through the framework's test client | 11 | 37 |
+| API and repositories against PostgreSQL | 6 | 9 |
+| Total | 29 | 66 |
+
+Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format.
+
+### Isolation
+
+- Database suites run only when `DB_NAME` ends in `_test`, so a run pointed at `netly_profile` or `netly_budget` skips them instead of wiping working data.
+- Every database test starts from empty tables: Profile Service truncates `users`, Budget Service truncates its four tables after applying migrations.
+- Each test creates its own application and in-memory state, and budget tests sign tokens for fresh random users, so no test depends on another's data or order. Database suites are `.serialized` because they share the tables; the rest run in parallel.
+
+### Coverage
+
+Measured on 2026-11-10 with `./scripts/test.sh` (all 95 tests passing, database suites included):
+
+| Service | Lines | Functions | Regions |
+| ------- | ----- | --------- | ------- |
+| Profile Service | 83.4% (342 of 410) | 81.2% | 75.5% |
+| Budget Service | 91.7% (1200 of 1309) | 89.0% | 84.7% |
+
+Where coverage is low, and why:
+
+- **Entry points: 0%.** `Entrypoint.swift` (Profile) and `App.swift` (Budget) parse the command line and start the server; tests build the application directly. They are exercised every time `docker compose up` starts the services.
+- **`MakeAdminCommand.swift`: 0%.** The console command that grants `admin` is checked by hand (`docs/auth-check.md`); the role check it enables is tested through `adminListsUsersAfterPromotion`.
+- **`CreateUsers.swift`: 6%.** The migration body runs once, on an empty database; on a repeated run the test database is already migrated, and `revert` is never called. Budget Service, by contrast, tests its migration rollback (`rollbackRevertsOnlyTheNewestMigration`).
+- **`GoalContributionRepository.swift`: 79%.** The database test covers the two-step transaction and its rollback, but not listing contributions from PostgreSQL; that endpoint is tested only against the in-memory repository. A database test for `GET /goals/{id}/contributions` is the next one to add.
+- **Error middleware: 87-89%.** The remaining lines map framework errors the API never produces in tests (for example an unexpected `AbortError` status).
+
+The business rules themselves (`Validator`, `MonthlyEquivalent`, the resource rules, `AuthController`, `User`) are at 98-100%.
+
+### Security
+
+The API was checked against the OWASP API Security Top 10: parameterized queries, response fields, rate limiting, 401/403 on every protected route, object-level access and more. The checklist with evidence and the before/after record of the fix (rate limiting on `/auth/login` and `/auth/register`, `429` with `Retry-After`) is [`docs/security-checklist.md`](docs/security-checklist.md).
+
 ## Repository Layout
 
 ```
@@ -231,6 +266,7 @@ netly/
 │   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
 │   │   └── budget-service.md             validation, error format, examples
 │   ├── auth-check.md            access by role, checked against the running services
+│   ├── security-checklist.md    OWASP API checks, the rate-limit fix before and after
 │   ├── requirements.md          business problem, user stories, decomposition
 │   ├── database.md              Budget Service schema, constraints, indexes, migrations
 │   ├── er-diagram.png           ER diagram of netly_budget
@@ -239,6 +275,7 @@ netly/
 │   └── architecture.png
 ├── scripts/
 │   ├── init-databases.sh        creates the additional databases in PostgreSQL
+│   ├── test.sh                  runs every test against the _test databases, writes coverage
 │   ├── dev-token.sh             issues a development JWT for Budget Service alone
 │   └── demo-auth.sh             register, log in and call both services
 ├── services/
