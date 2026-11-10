@@ -35,6 +35,7 @@ swift run App make-admin a@netly.kz  # выдать роль admin сущест�
 - Неверный пароль и неизвестный email дают одинаковый `401 Invalid email or password`; для неизвестного email всё равно проверяется хеш, чтобы время ответа не выдавало, зарегистрирован ли адрес.
 - Токен — JWT HS256 с `sub` (id пользователя), `role`, `iat`, `exp` = `iat` + 900 с. Budget Service проверяет его подпись общим `JWT_SECRET`.
 - Поле `role` в теле регистрации игнорируется. Роль `admin` выдаёт только команда `App make-admin`.
+- Вход и регистрация принимают не больше 10 запросов в минуту с одного IP-адреса на каждый маршрут; лишний запрос получает `429 too_many_requests` и заголовок `Retry-After`.
 
 ## Тесты
 
@@ -42,11 +43,4 @@ swift run App make-admin a@netly.kz  # выдать роль admin сущест�
 docker run --rm -v "$PWD":/src -w /src swift:6.2-noble swift test
 ```
 
-Проверки доступа и валидации работают без базы. Регистрация, вход и роли проверяются на PostgreSQL, если заданы `DB_*`:
-
-```bash
-docker compose up -d postgres
-docker run --rm --network netly_default -v "$PWD":/src -w /src \
-  -e DB_HOST=postgres -e DB_NAME=netly_profile -e DB_USER=netly -e DB_PASSWORD=netly \
-  swift:6.2-noble swift test
-```
+Проверки доступа, валидации и модульные тесты работают без базы. Регистрация, вход и роли проверяются на PostgreSQL, если заданы `DB_*`, причем только в базе с суффиксом `_test`: тесты очищают таблицу `users` и не должны трогать рабочую `netly_profile`. Все тесты вместе с отчетом о покрытии запускает `scripts/test.sh profile` из корня репозитория.

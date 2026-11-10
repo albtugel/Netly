@@ -15,6 +15,7 @@ struct APIError: Error, Equatable, Sendable {
     let code: String
     let message: String
     var fieldErrors: [FieldError] = []
+    var retryAfterSeconds: Int?
 
     static func malformedJSON(_ message: String = "Request body is not valid JSON") -> APIError {
         APIError(status: .badRequest, code: "malformed_json", message: message)
@@ -34,6 +35,15 @@ struct APIError: Error, Equatable, Sendable {
 
     static func conflict(_ message: String) -> APIError {
         APIError(status: .conflict, code: "conflict", message: message)
+    }
+
+    static func tooManyRequests(retryAfterSeconds: Int) -> APIError {
+        APIError(
+            status: .tooManyRequests,
+            code: "too_many_requests",
+            message: "Too many attempts, retry in \(retryAfterSeconds) s",
+            retryAfterSeconds: retryAfterSeconds
+        )
     }
 
     static func validationFailed(_ fieldErrors: [FieldError]) -> APIError {
