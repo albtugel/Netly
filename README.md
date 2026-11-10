@@ -212,7 +212,7 @@ One command runs both services' tests in the `swift:6.2-noble` image against Pos
 ./scripts/test.sh profile    # one service: profile or budget
 ```
 
-The script starts the compose `postgres` container, creates `netly_profile_test` and `netly_budget_test` if they are missing, runs `swift test --enable-code-coverage` and converts the result with `llvm-cov`. Reports land in `coverage/` (git-ignored): `coverage/<service>-service.txt` with per-file numbers and `coverage/<service>-service/index.html` to browse line by line.
+The script starts the compose `postgres` container, recreates the empty `netly_profile_test` and `netly_budget_test` databases, so every run starts from the same state and applies all migrations, runs `swift test --enable-code-coverage` and converts the result with `llvm-cov`. Reports land in `coverage/` (git-ignored): `coverage/<service>-service.txt` with per-file numbers and `coverage/<service>-service/index.html` to browse line by line.
 
 Without Docker networking, `swift test` inside a service directory runs every test that needs no database; the database suites are skipped.
 
@@ -220,10 +220,10 @@ Without Docker networking, `swift test` inside a service directory runs every te
 
 | Kind | Profile Service | Budget Service |
 | ---- | --------------- | -------------- |
-| Unit, no network or database | 12 | 20 |
+| Unit, no network or database | 13 | 20 |
 | API through the framework's test client | 11 | 37 |
 | API and repositories against PostgreSQL | 6 | 9 |
-| Total | 29 | 66 |
+| Total | 30 | 66 |
 
 Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format.
 
@@ -235,18 +235,18 @@ Unit tests cover the business rules: email normalization and format, the 15-minu
 
 ### Coverage
 
-Measured on 2026-11-10 with `./scripts/test.sh` (all 95 tests passing, database suites included):
+Measured on 2026-11-10 with `./scripts/test.sh` (all 96 tests passing, database suites included; a repeated run gives the same numbers):
 
 | Service | Lines | Functions | Regions |
 | ------- | ----- | --------- | ------- |
-| Profile Service | 83.4% (342 of 410) | 81.2% | 75.5% |
+| Profile Service | 87.6% (368 of 420) | 83.6% | 77.8% |
 | Budget Service | 91.7% (1200 of 1309) | 89.0% | 84.7% |
 
 Where coverage is low, and why:
 
 - **Entry points: 0%.** `Entrypoint.swift` (Profile) and `App.swift` (Budget) parse the command line and start the server; tests build the application directly. They are exercised every time `docker compose up` starts the services.
 - **`MakeAdminCommand.swift`: 0%.** The console command that grants `admin` is checked by hand (`docs/auth-check.md`); the role check it enables is tested through `adminListsUsersAfterPromotion`.
-- **`CreateUsers.swift`: 6%.** The migration body runs once, on an empty database; on a repeated run the test database is already migrated, and `revert` is never called. Budget Service, by contrast, tests its migration rollback (`rollbackRevertsOnlyTheNewestMigration`).
+- **`CreateUsers.swift`: 83%.** The migration is applied to the freshly created test database, but its `revert` is never called; Budget Service, by contrast, tests its migration rollback (`rollbackRevertsOnlyTheNewestMigration`).
 - **`GoalContributionRepository.swift`: 79%.** The database test covers the two-step transaction and its rollback, but not listing contributions from PostgreSQL; that endpoint is tested only against the in-memory repository. A database test for `GET /goals/{id}/contributions` is the next one to add.
 - **Error middleware: 87-89%.** The remaining lines map framework errors the API never produces in tests (for example an unexpected `AbortError` status).
 

@@ -58,25 +58,25 @@ done
 12: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
 ```
 
-**Исправление.** В Profile Service добавлен `RateLimitMiddleware` (`Sources/App/Auth/RateLimiter.swift`) на группе `/auth`: не больше 10 запросов в минуту с одного IP-адреса отдельно для входа и для регистрации. Лишний запрос получает `429 too_many_requests` в общем формате ошибок и заголовок `Retry-After` со временем ожидания в секундах. Middleware стоит до обработчика, поэтому отклоненный запрос не доходит до bcrypt и базы.
+**Исправление.** В Profile Service добавлен `RateLimitMiddleware` (`Sources/App/Auth/RateLimiter.swift`) на группе `/auth`: не больше 10 запросов в минуту с одного IP-адреса отдельно для входа и для регистрации. Лишний запрос получает `429 too_many_requests` в общем формате ошибок и заголовок `Retry-After` со временем ожидания в секундах. Middleware стоит до обработчика, поэтому отклоненный запрос не доходит до bcrypt и базы. Счетчик привязан к маршруту, а не к строке пути, поэтому `/api/v1//auth/login/` попадает в тот же счетчик, что и `/api/v1/auth/login`. Таблица хранит не больше 10 000 адресов: истекшие записи удаляются не чаще раза в окно, а пока таблица заполнена, новые адреса получают 429, так что поток запросов с разных адресов не раздувает память.
 
 **После.**
 
-Те же запросы после исправления: первые 10 попыток обработаны, 11-я и 12-я отклонены без проверки пароля.
+Те же запросы после исправления: первые 10 попыток обработаны, 11-я отклонена без проверки пароля. 12-я попытка отправлена на `/api/v1//auth/login/`, чтобы проверить обход лимита другой записью пути: она тоже получает 429.
 
 ```
- 1: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 2: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 3: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 4: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 5: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 6: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 7: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 8: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
- 9: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
-10: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
-11: 429 Retry-After: 57 {"error":{"code":"too_many_requests","details":[],"message":"Too many attempts, retry in 57 s"}}
-12: 429 Retry-After: 57 {"error":{"code":"too_many_requests","details":[],"message":"Too many attempts, retry in 57 s"}}
+ 1 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 2 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 3 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 4 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 5 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 6 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 7 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 8 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+ 9 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+10 /api/v1/auth/login: 401 {"error":{"code":"unauthorized","details":[],"message":"Invalid email or password"}}
+11 /api/v1/auth/login: 429 Retry-After: 57 {"error":{"code":"too_many_requests","details":[],"message":"Too many attempts, retry in 57 s"}}
+12 /api/v1//auth/login/: 429 Retry-After: 57 {"error":{"code":"too_many_requests","details":[],"message":"Too many attempts, retry in 57 s"}}
 ```
 
 **Ограничения.** Счетчики хранятся в памяти одного экземпляра сервиса: при нескольких экземплярах лимит считается в каждом отдельно, и для них нужно общее хранилище (Redis). За обратным прокси все запросы придут с адреса прокси; тогда ключом нужно сделать адрес из `X-Forwarded-For`, которому доверяет прокси.
