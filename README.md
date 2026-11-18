@@ -154,7 +154,7 @@ The server refuses to start while the schema is behind the code.
 - **Observable.** The `X-Cache: HIT` or `MISS` response header and the log lines `summary cache miss`, `hit`, `store`, `expired`, `invalidated` (with the `reason`) and `summary computation failed`, each with the `userId`.
 - **Limits.** Concurrent misses of one user are not coalesced: N simultaneous requests compute and store N times (N x 3 reads). The cache is per process. With several Budget Service instances each would have its own, so a shared store would be needed to keep them consistent.
 
-Measured on 2026-11-18 against the compose stack: a miss took 4.3 ms and the next two requests 1.5 and 1.6 ms; after a `PATCH`, a `DELETE` and a contribution the next read was a miss with the new figures; with PostgreSQL stopped, a cached summary was still served and a miss answered `503` after 5.0 s without hanging the service. The protocol with the real requests, timings and log fragments is [`docs/async-scenario.md`](docs/async-scenario.md); the contract is in [`docs/api/budget-service.md`](docs/api/budget-service.md#summary--apiv1summary).
+Measured on 2026-11-18 against the compose stack: a miss took 4.3 ms and the next two requests 1.5 and 1.6 ms; after a `PATCH`, a `DELETE` and a contribution the next read was a miss with the new figures; with PostgreSQL stopped, a cached summary was still served and a miss answered `503` after 5.0 s without hanging the service, and the same with PostgreSQL paused (`docker pause`) on an open connection (5.0 s). The protocol with the real requests, timings and log fragments is [`docs/async-scenario.md`](docs/async-scenario.md); the contract is in [`docs/api/budget-service.md`](docs/api/budget-service.md#summary--apiv1summary).
 
 ### Authentication and roles
 
@@ -234,11 +234,11 @@ Without Docker networking, `swift test` inside a service directory runs every te
 | Kind | Profile Service | Budget Service |
 | ---- | --------------- | -------------- |
 | Unit, no network or database | 14 | 24 |
-| API through the framework's test client | 11 | 51 |
+| API through the framework's test client | 11 | 52 |
 | API and repositories against PostgreSQL | 6 | 10 |
-| Total | 31 | 85 |
+| Total | 31 | 86 |
 
-Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format. The summary cache is tested with a counting repository (a hit within the TTL reads nothing), an injected clock (expiry), every kind of write (invalidation), two users (isolation) and a repository that fails or hangs (failures are not cached, `503` instead of a hang).
+Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format. The summary cache is tested with a counting repository (a hit within the TTL reads nothing), an injected clock (expiry), every kind of write (invalidation), two users (isolation) and a repository that fails, hangs or ignores cancellation (failures are not cached, `503` after the limit instead of a hang).
 
 ### Isolation
 
@@ -248,12 +248,12 @@ Unit tests cover the business rules: email normalization and format, the 15-minu
 
 ### Coverage
 
-Measured with `./scripts/test.sh`, database suites included. Profile Service on 2026-11-10 (31 tests); Budget Service on 2026-11-18 with `./scripts/test.sh budget` after the summary cache was added (85 tests, all passing):
+Measured with `./scripts/test.sh`, database suites included. Profile Service on 2026-11-10 (31 tests); Budget Service on 2026-11-18 with `./scripts/test.sh budget` after the summary cache was added (86 tests, all passing):
 
 | Service | Lines | Functions | Regions |
 | ------- | ----- | --------- | ------- |
 | Profile Service | 87.9% (385 of 438) | 83.5% | 78.4% |
-| Budget Service | 92.5% (1378 of 1490) | 90.2% | 86.4% |
+| Budget Service | 92.7% (1418 of 1530) | 90.3% | 86.5% |
 
 Where coverage is low, and why:
 
