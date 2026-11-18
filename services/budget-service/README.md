@@ -22,6 +22,7 @@ swift run
 | `DB_USER` | — | Database user, required |
 | `DB_PASSWORD` | — | Database password, required |
 | `DB_SSLMODE` | — | `require` forces TLS; otherwise the connection is plain, as on the internal compose network |
+| `SUMMARY_CACHE_TTL_SECONDS` | `60` | How long `GET /api/v1/summary` is served from the in-process cache; `0` turns the cache off |
 
 The connection is configured only through these variables; [`.env.example`](../../.env.example) lists them with local defaults. The service refuses to start if a required one is missing, and on start-up logs the server it connected to:
 
@@ -58,6 +59,18 @@ set -a && . ../../.env && set +a && DB_NAME=netly_budget_test swift test
 ```
 
 `scripts/test.sh budget` from the repository root creates the test database and writes a coverage report to `coverage/`.
+
+## Summary cache
+
+`GET /api/v1/summary` adds up what the user owes every month: subscriptions' `monthlyCost`, debts' `monthlyPayment` and the `requiredMonthlyContribution` of active goals. It costs three repository reads, so the result is kept per user in the `SummaryCache` actor ([`Sources/App/Cache`](Sources/App/Cache/SummaryCache.swift)) for `SUMMARY_CACHE_TTL_SECONDS`.
+
+- **Invalidation.** Creating, updating or deleting a subscription, debt or goal, and adding a goal contribution, drop the caller's entry before the response is sent, so the next read recomputes. Other users' entries stay.
+- **Failures are not cached.** If a repository read fails, the client gets the usual `500` error body, the next request tries again, and a still-valid cached entry keeps being served while the database is down.
+- **Bounded.** At most 10 000 entries; when full, the oldest one goes.
+- **Logs.** `summary cache miss`, `hit`, `store`, `expired`, `invalidated` (with the `reason`, e.g. `subscriptions updated`) and `summary computation failed`, each with the `userId`.
+- **Process-local.** Each instance has its own cache; a second instance would need a shared store (Redis) or a short TTL.
+
+Manual check with real requests and logs: [`docs/async-scenario.md`](../../docs/async-scenario.md).
 
 ## Errors
 
@@ -103,6 +116,7 @@ All `/api/v1` routes require `Authorization: Bearer <jwt>` and only see the call
 | DELETE | `/api/v1/{resource}/{id}`  | Delete; `204`                                     |
 | POST   | `/api/v1/goals/{id}/contributions` | Top up a goal: records the contribution and raises `savedAmount` in one transaction; `201` |
 | GET    | `/api/v1/goals/{id}/contributions` | The goal's contributions, oldest first, paged like any list |
+| GET    | `/api/v1/summary`          | Monthly commitments of the user; cached for `SUMMARY_CACHE_TTL_SECONDS`, `X-Cache: HIT` or `MISS` |
 
 `{resource}` is `subscriptions`, `debts` or `goals`. `GET /api/v1/goals` also accepts `?status=active|completed|archived`.
 

@@ -22,10 +22,14 @@ struct CommitmentsSummary: ResponseCodable, Equatable {
 /// `GET /api/v1/summary`: the monthly commitments, computed from three reads and cached per user.
 struct SummaryController: Sendable {
     static let cacheHeader = HTTPField.Name("X-Cache")!
+    static let defaultComputeTimeout = Duration.seconds(5)
 
     let repositories: Repositories
     let cache: SummaryCache
     let clock: @Sendable () -> Date
+    /// How long a computation may take. A database that is down makes the pool wait for a connection
+    /// instead of failing, so without this limit a cache miss would hang until the client gives up.
+    var computeTimeout = SummaryController.defaultComputeTimeout
 
     func addRoutes(to api: RouterGroup<BudgetRequestContext>) {
         api.get("summary", use: show)
@@ -34,8 +38,25 @@ struct SummaryController: Sendable {
     /// The `X-Cache` response header tells whether the body came from the cache (`HIT`) or was computed (`MISS`).
     @Sendable func show(_ request: Request, context: BudgetRequestContext) async throws -> EditedResponse<CommitmentsSummary> {
         let userID = try context.requireIdentity().id
-        let (summary, isHit) = try await cache.summary(for: userID) { try await compute(for: userID) }
+        let (summary, isHit) = try await cache.summary(for: userID) {
+            try await Self.withTimeout(computeTimeout) { try await compute(for: userID) }
+        }
         return EditedResponse(headers: [Self.cacheHeader: isHit ? "HIT" : "MISS"], response: summary)
+    }
+
+    private static func withTimeout<Value: Sendable>(
+        _ timeout: Duration,
+        _ operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try await withThrowingTaskGroup(of: Value.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw APIError.serviceUnavailable("The summary could not be computed in time; try again later")
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
+        }
     }
 
     private func compute(for userID: UUID) async throws -> CommitmentsSummary {

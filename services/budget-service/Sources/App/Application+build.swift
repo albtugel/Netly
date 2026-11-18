@@ -53,6 +53,7 @@ func buildRouter(
     repositories: Repositories,
     clock: @escaping @Sendable () -> Date = { Date() },
     summaryCacheTTL: TimeInterval = SummaryCache.defaultTTL,
+    summaryComputeTimeout: Duration = SummaryController.defaultComputeTimeout,
     logger: Logger = makeLogger()
 ) -> Router<BudgetRequestContext> {
     let router = Router(context: BudgetRequestContext.self)
@@ -69,7 +70,8 @@ func buildRouter(
     ResourceController(repository: repositories.debts, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
     ResourceController(repository: repositories.goals, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
     GoalContributionController(repository: repositories.goalContributions, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
-    SummaryController(repositories: repositories, cache: summaryCache, clock: clock).addRoutes(to: api)
+    SummaryController(repositories: repositories, cache: summaryCache, clock: clock, computeTimeout: summaryComputeTimeout)
+        .addRoutes(to: api)
 
     return router
 }

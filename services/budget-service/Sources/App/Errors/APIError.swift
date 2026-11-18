@@ -40,6 +40,10 @@ struct APIError: Error, Equatable, Sendable {
         )
     }
 
+    static func serviceUnavailable(_ message: String) -> APIError {
+        APIError(status: .serviceUnavailable, code: "service_unavailable", message: message)
+    }
+
     static let internalError = APIError(
         status: .internalServerError,
         code: "internal_error",

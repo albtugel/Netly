@@ -28,6 +28,7 @@ private actor CountingRepository<Fields: ResourceFields>: RecordRepository {
     private let base: any RecordRepository<Fields>
     private(set) var listCalls = 0
     var isFailing = false
+    var isHanging = false
 
     init(_ base: any RecordRepository<Fields>) {
         self.base = base
@@ -37,9 +38,15 @@ private actor CountingRepository<Fields: ResourceFields>: RecordRepository {
         isFailing = failing
     }
 
+    /// Makes `list` wait, like a pool with no connection to hand out, until the caller gives up.
+    func setHanging(_ hanging: Bool) {
+        isHanging = hanging
+    }
+
     func list(userID: UUID, filters: [AppliedFilter<Fields>], limit: Int, offset: Int) async throws -> (records: [Record<Fields>], total: Int) {
         listCalls += 1
         if isFailing { throw DatabaseDown() }
+        if isHanging { try await Task.sleep(for: .seconds(60)) }
         return try await base.list(userID: userID, filters: filters, limit: limit, offset: offset)
     }
 
@@ -100,9 +107,11 @@ private struct Harness {
     let clock = ManualClock()
     let logs = LogRecorder()
     let ttl: TimeInterval
+    let computeTimeout: Duration
 
-    init(ttl: TimeInterval = 60) {
+    init(ttl: TimeInterval = 60, computeTimeout: Duration = SummaryController.defaultComputeTimeout) {
         self.ttl = ttl
+        self.computeTimeout = computeTimeout
         subscriptions = CountingRepository(InMemoryRecordRepository<SubscriptionFields>(clock: { TestSupport.now }))
         debts = CountingRepository(InMemoryRecordRepository<DebtFields>(clock: { TestSupport.now }))
         goals = CountingRepository(InMemoryRecordRepository<GoalFields>(clock: { TestSupport.now }))
@@ -128,6 +137,7 @@ private struct Harness {
             repositories: repositories,
             clock: { clock.now },
             summaryCacheTTL: ttl,
+            summaryComputeTimeout: computeTimeout,
             logger: Logger(label: "summary-cache-tests") { _ in RecordingLogHandler(recorder: recorder) }
         )
         return Application(router: router)
@@ -332,6 +342,26 @@ private func getSummary(_ api: APIClient) async throws -> CachedSummary {
             #expect(await harness.debts.listCalls == 2)
 
             await harness.debts.setFailing(false)
+            #expect(try await getSummary(api).header == "MISS")
+            #expect(try await getSummary(api).header == "HIT")
+        }
+    }
+
+    /// A database that is down does not always fail fast: the pool may just wait for a connection.
+    @Test func hangingComputationAnswersServiceUnavailableAndIsNotCached() async throws {
+        let harness = Harness(computeTimeout: .milliseconds(200))
+        let token = try await TestSupport.token()
+        try await harness.application().test(.router) { client in
+            let api = APIClient(client: client, token: token)
+            await harness.debts.setHanging(true)
+
+            let started = ContinuousClock.now
+            let response = try await api.send(.get, "/api/v1/summary")
+            #expect(ContinuousClock.now - started < .seconds(5))
+            #expect(response.status == .serviceUnavailable)
+            #expect(try TestSupport.errorBody(from: response).code == "service_unavailable")
+
+            await harness.debts.setHanging(false)
             #expect(try await getSummary(api).header == "MISS")
             #expect(try await getSummary(api).header == "HIT")
         }
