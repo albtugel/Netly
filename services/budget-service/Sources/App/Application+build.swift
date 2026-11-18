@@ -28,7 +28,12 @@ func buildApplication(configuration: AppConfiguration) async throws -> some Appl
     let postgres = PostgresClient(configuration: configuration.database, backgroundLogger: logger)
 
     var app = Application(
-        router: buildRouter(keys: keys, repositories: .postgres(client: postgres, logger: logger)),
+        router: buildRouter(
+            keys: keys,
+            repositories: .postgres(client: postgres, logger: logger),
+            summaryCacheTTL: configuration.summaryCacheTTL,
+            logger: logger
+        ),
         configuration: .init(
             address: .hostname(configuration.hostname, port: configuration.port),
             serverName: serviceName
@@ -46,7 +51,9 @@ func buildApplication(configuration: AppConfiguration) async throws -> some Appl
 func buildRouter(
     keys: JWTKeyCollection,
     repositories: Repositories,
-    clock: @escaping @Sendable () -> Date = { Date() }
+    clock: @escaping @Sendable () -> Date = { Date() },
+    summaryCacheTTL: TimeInterval = SummaryCache.defaultTTL,
+    logger: Logger = makeLogger()
 ) -> Router<BudgetRequestContext> {
     let router = Router(context: BudgetRequestContext.self)
     router.add(middleware: APIErrorMiddleware())
@@ -57,10 +64,12 @@ func buildRouter(
 
     let api = router.group("api/v1")
         .add(middleware: JWTAuthenticator(keys: keys))
-    ResourceController(repository: repositories.subscriptions, clock: clock).addRoutes(to: api)
-    ResourceController(repository: repositories.debts, clock: clock).addRoutes(to: api)
-    ResourceController(repository: repositories.goals, clock: clock).addRoutes(to: api)
-    GoalContributionController(repository: repositories.goalContributions, clock: clock).addRoutes(to: api)
+    let summaryCache = SummaryCache(ttl: summaryCacheTTL, clock: clock, logger: logger)
+    ResourceController(repository: repositories.subscriptions, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
+    ResourceController(repository: repositories.debts, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
+    ResourceController(repository: repositories.goals, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
+    GoalContributionController(repository: repositories.goalContributions, clock: clock, summaryCache: summaryCache).addRoutes(to: api)
+    SummaryController(repositories: repositories, cache: summaryCache, clock: clock).addRoutes(to: api)
 
     return router
 }

@@ -107,6 +107,23 @@ struct PostgresIntegrationTests {
         }
     }
 
+    @Test func summaryAddsUpTheUsersActiveCommitmentsInPostgres() async throws {
+        let token = try await TestSupport.token()
+        try await withPostgresAPI { client in
+            let api = APIClient(client: client, token: token)
+            _ = try await api.send(.post, "/api/v1/subscriptions", json: #"{"name": "Netflix", "price": 119.88, "billingCycle": "yearly", "nextChargeDate": "2026-10-15"}"#)
+            _ = try await api.send(.post, "/api/v1/debts", json: #"{"creditor": "Bank", "amount": 1200, "dueDate": "2026-12-26"}"#)
+            _ = try await api.send(.post, "/api/v1/goals", json: #"{"name": "Laptop", "targetAmount": 1500, "savedAmount": 300, "targetDate": "2027-09-26", "priority": 8}"#)
+            _ = try await api.send(.post, "/api/v1/goals", json: #"{"name": "Old", "targetAmount": 500, "targetDate": "2027-09-26", "priority": 1, "status": "archived"}"#)
+
+            let response = try await api.send(.get, "/api/v1/summary")
+            #expect(response.status == .ok)
+            let summary = try TestSupport.decode(CommitmentsSummary.self, from: response)
+            #expect(summary.totalMonthlyCommitments == Decimal(string: "509.99"))
+            #expect(summary.counts == .init(subscriptions: 1, debts: 1, goals: 1))
+        }
+    }
+
     @Test func listPagesAndCountsPerUser() async throws {
         let token = try await TestSupport.token()
         try await withPostgresAPI { client in

@@ -38,6 +38,23 @@ import Testing
         let configuration = try AppConfiguration.fromEnvironment(DatabaseConfigurationTests.composeEnvironment)
         #expect(configuration.port == 8082)
         #expect(configuration.jwtSecret == AppConfiguration.developmentJWTSecret)
+        #expect(configuration.summaryCacheTTL == 60)
+    }
+
+    @Test(arguments: [("15", 15.0), ("0", 0.0), ("", 60.0)])
+    func readsSummaryCacheTTL(raw: String, expected: Double) throws {
+        var environment = DatabaseConfigurationTests.composeEnvironment
+        environment["SUMMARY_CACHE_TTL_SECONDS"] = raw
+        #expect(try AppConfiguration.fromEnvironment(environment).summaryCacheTTL == expected)
+    }
+
+    @Test(arguments: ["-1", "soon", "1.5"])
+    func rejectsInvalidSummaryCacheTTL(raw: String) {
+        #expect(throws: AppConfiguration.InvalidConfiguration.self) {
+            var environment = DatabaseConfigurationTests.composeEnvironment
+            environment["SUMMARY_CACHE_TTL_SECONDS"] = raw
+            try AppConfiguration.fromEnvironment(environment)
+        }
     }
 }
 
@@ -62,6 +79,7 @@ import Testing
         (.delete, "/api/v1/goals/\(id)"),
         (.get, "/api/v1/goals/\(id)/contributions"),
         (.post, "/api/v1/goals/\(id)/contributions"),
+        (.get, "/api/v1/summary"),
     ])
     func everyBudgetRouteRequiresAToken(method: HTTPRequest.Method, path: String) async throws {
         try await TestSupport.apiApplication().test(.router) { client in

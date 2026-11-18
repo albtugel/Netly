@@ -5,6 +5,7 @@ import Hummingbird
 struct ResourceController<Fields: ResourceFields>: Sendable {
     let repository: any RecordRepository<Fields>
     let clock: @Sendable () -> Date
+    let summaryCache: SummaryCache
 
     func addRoutes(to api: RouterGroup<BudgetRequestContext>) {
         let collection = api.group(RouterPath(Fields.collectionPath))
@@ -25,6 +26,7 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         let record = try await Self.rejectingDuplicates {
             try await repository.create(fields, userID: userID)
         }
+        await summaryCache.invalidate(userID: userID, reason: "\(Fields.collectionPath) created")
         return EditedResponse(
             status: .created,
             headers: [.location: "/api/v1/\(Fields.collectionPath)/\(record.id.uuidString.lowercased())"],
@@ -72,6 +74,7 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         guard let record = updated else {
             throw Self.notFound(id)
         }
+        await summaryCache.invalidate(userID: userID, reason: "\(Fields.collectionPath) updated")
         return Fields.response(for: record, today: today)
     }
 
@@ -81,6 +84,7 @@ struct ResourceController<Fields: ResourceFields>: Sendable {
         guard try await repository.delete(id: id, userID: userID) else {
             throw Self.notFound(id)
         }
+        await summaryCache.invalidate(userID: userID, reason: "\(Fields.collectionPath) deleted")
         return .noContent
     }
 

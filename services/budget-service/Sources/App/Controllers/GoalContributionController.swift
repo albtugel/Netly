@@ -5,6 +5,7 @@ import Hummingbird
 struct GoalContributionController: Sendable {
     let repository: any GoalContributionRepository
     let clock: @Sendable () -> Date
+    let summaryCache: SummaryCache
 
     func addRoutes(to api: RouterGroup<BudgetRequestContext>) {
         let contributions = api.group("goals/:id/contributions")
@@ -36,6 +37,8 @@ struct GoalContributionController: Sendable {
         guard let result else {
             throw Self.goalNotFound(goalID)
         }
+        // The contribution raises the goal's savedAmount, which the summary's required contribution depends on.
+        await summaryCache.invalidate(userID: userID, reason: "goal contribution added")
         return EditedResponse(
             status: .created,
             response: GoalContribution.CreatedResponse(
