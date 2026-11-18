@@ -41,14 +41,14 @@ import Testing
         #expect(configuration.summaryCacheTTL == 60)
     }
 
-    @Test(arguments: [("15", 15.0), ("0", 0.0), ("", 60.0)])
+    @Test(arguments: [("15", 15.0), ("0", 0.0), ("", 60.0), ("86400", 86_400.0)])
     func readsSummaryCacheTTL(raw: String, expected: Double) throws {
         var environment = DatabaseConfigurationTests.composeEnvironment
         environment["SUMMARY_CACHE_TTL_SECONDS"] = raw
         #expect(try AppConfiguration.fromEnvironment(environment).summaryCacheTTL == expected)
     }
 
-    @Test(arguments: ["-1", "soon", "1.5"])
+    @Test(arguments: ["-1", "soon", "1.5", "86401", "9223372036854775807", "99999999999999999999"])
     func rejectsInvalidSummaryCacheTTL(raw: String) {
         #expect(throws: AppConfiguration.InvalidConfiguration.self) {
             var environment = DatabaseConfigurationTests.composeEnvironment

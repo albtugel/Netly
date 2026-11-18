@@ -44,18 +44,49 @@ struct SummaryController: Sendable {
         return EditedResponse(headers: [Self.cacheHeader: isHit ? "HIT" : "MISS"], response: summary)
     }
 
+    /// Answers with `operation`'s result, or with `503` once `timeout` has passed, whichever comes first.
+    /// The operation runs in its own task that is cancelled on timeout, but the caller does not wait for it:
+    /// PostgresNIO ignores cancellation once a query is written, and a structured task group would wait for it.
     private static func withTimeout<Value: Sendable>(
         _ timeout: Duration,
         _ operation: @escaping @Sendable () async throws -> Value
     ) async throws -> Value {
-        try await withThrowingTaskGroup(of: Value.self) { group in
-            group.addTask { try await operation() }
-            group.addTask {
-                try await Task.sleep(for: timeout)
-                throw APIError.serviceUnavailable("The summary could not be computed in time; try again later")
+        try await withCheckedThrowingContinuation { continuation in
+            let race = Race(continuation)
+            let work = Task {
+                do {
+                    race.finish(.success(try await operation()))
+                } catch {
+                    race.finish(.failure(error))
+                }
             }
-            defer { group.cancelAll() }
-            return try await group.next()!
+            Task {
+                try? await Task.sleep(for: timeout)
+                if race.finish(.failure(APIError.serviceUnavailable("The summary could not be computed in time; try again later"))) {
+                    work.cancel()
+                }
+            }
+        }
+    }
+
+    /// Resumes its continuation for the first result only.
+    private final class Race<Value: Sendable>: @unchecked Sendable {
+        private let lock = NSLock()
+        private var continuation: CheckedContinuation<Value, any Error>?
+
+        init(_ continuation: CheckedContinuation<Value, any Error>) {
+            self.continuation = continuation
+        }
+
+        /// Returns whether this result was the first one.
+        @discardableResult
+        func finish(_ result: Result<Value, any Error>) -> Bool {
+            let pending = lock.withLock { () -> CheckedContinuation<Value, any Error>? in
+                defer { continuation = nil }
+                return continuation
+            }
+            pending?.resume(with: result)
+            return pending != nil
         }
     }
 

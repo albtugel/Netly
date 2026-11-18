@@ -52,6 +52,8 @@ actor SummaryCache {
         }
         logger.info("summary cache miss", metadata: metadata)
 
+        // ponytail: no request coalescing, so N concurrent misses of one user compute and store N times (N x 3 reads);
+        // share one in-flight Task per user if bursts of identical requests become common.
         let invalidationsBefore = invalidations
         let summary: CommitmentsSummary
         do {

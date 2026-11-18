@@ -31,11 +31,14 @@ struct AppConfiguration: Sendable {
         return configuration
     }
 
-    /// `SUMMARY_CACHE_TTL_SECONDS`: a whole number of seconds, `0` to disable; default 60.
+    /// A day is far beyond any useful TTL; the bound also keeps the value safely convertible and addable to a date.
+    static let maximumSummaryCacheTTL = 86_400
+
+    /// `SUMMARY_CACHE_TTL_SECONDS`: a whole number of seconds, `0` to disable, at most a day; default 60.
     private static func summaryCacheTTL(_ raw: String?) throws -> TimeInterval {
         guard let raw, !raw.isEmpty else { return SummaryCache.defaultTTL }
-        guard let seconds = Int(raw), seconds >= 0 else {
-            throw InvalidConfiguration(description: "SUMMARY_CACHE_TTL_SECONDS must be a non-negative whole number, got \(raw)")
+        guard let seconds = Int(raw), (0...maximumSummaryCacheTTL).contains(seconds) else {
+            throw InvalidConfiguration(description: "SUMMARY_CACHE_TTL_SECONDS must be a whole number from 0 to \(maximumSummaryCacheTTL), got \(raw)")
         }
         return TimeInterval(seconds)
     }

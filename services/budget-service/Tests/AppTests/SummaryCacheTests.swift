@@ -29,6 +29,8 @@ private actor CountingRepository<Fields: ResourceFields>: RecordRepository {
     private(set) var listCalls = 0
     var isFailing = false
     var isHanging = false
+    private var stalled: [CheckedContinuation<Void, Never>] = []
+    private var isStalling = false
 
     init(_ base: any RecordRepository<Fields>) {
         self.base = base
@@ -43,10 +45,26 @@ private actor CountingRepository<Fields: ResourceFields>: RecordRepository {
         isHanging = hanging
     }
 
+    /// Makes `list` block on a continuation that cancellation cannot interrupt, until `release()`.
+    func setStalling(_ stalling: Bool) {
+        isStalling = stalling
+    }
+
+    func release() {
+        isStalling = false
+        stalled.forEach { $0.resume() }
+        stalled = []
+    }
+
+    private func stall() async {
+        await withCheckedContinuation { stalled.append($0) }
+    }
+
     func list(userID: UUID, filters: [AppliedFilter<Fields>], limit: Int, offset: Int) async throws -> (records: [Record<Fields>], total: Int) {
         listCalls += 1
         if isFailing { throw DatabaseDown() }
         if isHanging { try await Task.sleep(for: .seconds(60)) }
+        if isStalling { await stall() }
         return try await base.list(userID: userID, filters: filters, limit: limit, offset: offset)
     }
 
@@ -364,6 +382,27 @@ private func getSummary(_ api: APIClient) async throws -> CachedSummary {
             await harness.debts.setHanging(false)
             #expect(try await getSummary(api).header == "MISS")
             #expect(try await getSummary(api).header == "HIT")
+        }
+    }
+
+    /// A query on an open connection that does not answer ignores cancellation, so the limit must not wait for it.
+    @Test func computationThatIgnoresCancellationStillAnswersServiceUnavailableInTime() async throws {
+        let harness = Harness(computeTimeout: .milliseconds(200))
+        let token = try await TestSupport.token()
+        try await harness.application().test(.router) { client in
+            let api = APIClient(client: client, token: token)
+            await harness.debts.setStalling(true)
+
+            let started = ContinuousClock.now
+            let response = try await api.send(.get, "/api/v1/summary")
+            let elapsed = ContinuousClock.now - started
+            #expect(response.status == .serviceUnavailable)
+            #expect(try TestSupport.errorBody(from: response).code == "service_unavailable")
+            #expect(elapsed >= .milliseconds(200))
+            #expect(elapsed < .seconds(2))
+
+            await harness.debts.release()
+            #expect(try await getSummary(api).header == "MISS")
         }
     }
 
