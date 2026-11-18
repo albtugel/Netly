@@ -8,7 +8,7 @@ A protocol of the manual check of the Budget Service summary cache: the normal p
 
 | Expectation | Where it is shown |
 | ----------- | ----------------- |
-| A repeat request within the TTL is faster and does not read the database | [1](#1-normal-path-miss-then-hits), and [6](#6-failure-path-postgresql-is-stopped): the hit is served while the database is down |
+| A repeat request within the TTL is faster and does not read the database | [1](#1-normal-path-miss-then-hits), and [4](#4-failure-path-postgresql-is-stopped): the hit is served while the database is down |
 | After the TTL the entry expires and is recomputed | [2](#2-normal-path-the-entry-expires) |
 | Update, delete and a goal contribution invalidate the entry; no stale numbers | [3](#3-failure-path-invalidation-after-writes) |
 | A failed computation is not cached, the answer is a controlled error, the service keeps serving | [4](#4-failure-path-postgresql-is-stopped) |

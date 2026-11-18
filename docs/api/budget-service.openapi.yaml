@@ -430,8 +430,9 @@ paths:
         goal contribution drop the caller's cached summary before that write answers, so the next read is a `MISS` with fresh numbers.
         Failures are never cached.
 
-        If the computation does not finish within 5 seconds (for example the database is down and the pool waits for a connection),
-        the answer is `503` `service_unavailable`; a still-valid cached summary is served regardless.
+        A cache miss waits at most 5 seconds for the three reads. If they have not finished by then (for example the database
+        is down or stalled), the answer is `503` `service_unavailable`; the abandoned reads are not guaranteed to stop.
+        A read that fails sooner answers `500` `internal_error`. A still-valid cached summary is served regardless.
       operationId: getSummary
       responses:
         "200":

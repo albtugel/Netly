@@ -145,14 +145,14 @@ The server refuses to start while the schema is behind the code.
 
 ### Summary cache
 
-`GET /api/v1/summary` returns what the user has to pay every month: subscriptions, debts and the contributions that active goals require. The result is cached in Budget Service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60; `0` turns the cache off).
+`GET /api/v1/summary` returns what the user has to pay every month: subscriptions, debts and the contributions that active goals require. The result is cached in Budget Service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60, at most 86400; `0` turns the cache off).
 
 **Why caching fits Netly.** The summary is the figure the iOS home screen asks for on every launch and refresh, while it changes only when the user edits a subscription, a debt or a goal, so reads far outnumber writes. One summary costs three database reads and a calculation, and a per-user entry in the service's own memory removes most of that load without adding a component such as Redis. Because every write that affects the summary drops the user's entry at once, the user never sees stale numbers after an edit; the TTL only bounds how long an entry lives.
 
 - **Explicit invalidation.** Creating, updating or deleting a subscription, a debt or a goal, and adding a goal contribution, drop the caller's entry; other users' entries stay.
-- **Failures are not cached.** A computation that fails or takes longer than 5 seconds (for example PostgreSQL is down) answers with the usual error body (`503 service_unavailable`), nothing is stored, and the next request tries again. A still-valid entry is served meanwhile.
+- **Failures are not cached.** A cache miss waits at most 5 seconds for the three reads; if they have not finished by then (for example PostgreSQL is down or stalled) the answer is `503 service_unavailable`, and a read that fails sooner answers `500 internal_error`, both in the usual error body. The abandoned reads are not guaranteed to stop. Nothing is stored, the next request tries again, and a still-valid entry is served meanwhile.
 - **Observable.** The `X-Cache: HIT` or `MISS` response header and the log lines `summary cache miss`, `hit`, `store`, `expired`, `invalidated` (with the `reason`) and `summary computation failed`, each with the `userId`.
-- **Limit.** The cache is per process. With several Budget Service instances each would have its own, so a shared store would be needed to keep them consistent.
+- **Limits.** Concurrent misses of one user are not coalesced: N simultaneous requests compute and store N times (N x 3 reads). The cache is per process. With several Budget Service instances each would have its own, so a shared store would be needed to keep them consistent.
 
 Measured on 2026-11-18 against the compose stack: a miss took 4.3 ms and the next two requests 1.5 and 1.6 ms; after a `PATCH`, a `DELETE` and a contribution the next read was a miss with the new figures; with PostgreSQL stopped, a cached summary was still served and a miss answered `503` after 5.0 s without hanging the service. The protocol with the real requests, timings and log fragments is [`docs/async-scenario.md`](docs/async-scenario.md); the contract is in [`docs/api/budget-service.md`](docs/api/budget-service.md#summary--apiv1summary).
 

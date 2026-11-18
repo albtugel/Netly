@@ -125,7 +125,7 @@ The response is `application/json`, and the HTTP status carries the class of the
 | 409    | `conflict`          | A subscription with the same name (case-insensitive) already exists for this user     |
 | 422    | `validation_failed` | Missing field, wrong JSON type, unknown enum value, invalid date, or a broken rule    |
 | 500    | `internal_error`    | Anything unexpected; the cause is logged, the response says only "An unexpected error occurred" |
-| 503    | `service_unavailable` | `GET /api/v1/summary` could not be computed within 5 seconds, e.g. the database is down; try again later |
+| 503    | `service_unavailable` | `GET /api/v1/summary` missed the cache and its reads had not finished after 5 seconds, e.g. the database is down or stalled; try again later |
 
 Field-level codes:
 
@@ -601,9 +601,10 @@ The user's monthly commitments, computed from the other resources and cached per
 
 Cache rules:
 
-- The answer is kept in the service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60, `0` turns the cache off). `X-Cache: HIT` marks a cached answer, `X-Cache: MISS` one computed for this request.
+- The answer is kept in the service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60, 0 to 86400, `0` turns the cache off). `X-Cache: HIT` marks a cached answer, `X-Cache: MISS` one computed for this request.
 - Creating, updating or deleting a subscription, debt or goal, and adding a goal contribution, drop the caller's cached summary before that write answers, so the next read is a `MISS` with fresh figures. Another user's writes do not affect it. A write that is rejected (`404`, `409`, `422`) changes nothing and keeps the cache.
-- A failed computation is never cached. If it takes longer than 5 seconds, for example because the database is down, the answer is `503 service_unavailable`; a still-valid cached summary is served even then.
+- A failed computation is never cached. A read that fails answers `500 internal_error`; if the reads have not finished 5 seconds after the miss, for example because the database is down or stalled, the answer is `503 service_unavailable` (the abandoned reads are not guaranteed to stop). A still-valid cached summary is served even then.
+- Concurrent misses of one user are not coalesced: N simultaneous requests compute and store N times (N x 3 reads).
 - The cache lives in one process: with several instances each has its own, so a figure can be up to the TTL old on an instance that did not see the write.
 
 #### Get the summary
