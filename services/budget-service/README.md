@@ -65,7 +65,7 @@ set -a && . ../../.env && set +a && DB_NAME=netly_budget_test swift test
 `GET /api/v1/summary` adds up what the user owes every month: subscriptions' `monthlyCost`, debts' `monthlyPayment` and the `requiredMonthlyContribution` of active goals. It costs three repository reads, so the result is kept per user in the `SummaryCache` actor ([`Sources/App/Cache`](Sources/App/Cache/SummaryCache.swift)) for `SUMMARY_CACHE_TTL_SECONDS`.
 
 - **Invalidation.** Creating, updating or deleting a subscription, debt or goal, and adding a goal contribution, drop the caller's entry before the response is sent, so the next read recomputes. Other users' entries stay.
-- **Failures are not cached.** If a repository read fails, the client gets the usual `500` error body, the next request tries again, and a still-valid cached entry keeps being served while the database is down.
+- **Failures are not cached.** If a repository read fails, the client gets the usual error body (`503` when the computation takes longer than 5 seconds, as with the database down, otherwise `500`), the next request tries again, and a still-valid cached entry keeps being served while the database is down.
 - **Bounded.** At most 10 000 entries; when full, the oldest one goes.
 - **Logs.** `summary cache miss`, `hit`, `store`, `expired`, `invalidated` (with the `reason`, e.g. `subscriptions updated`) and `summary computation failed`, each with the `userId`.
 - **Process-local.** Each instance has its own cache; a second instance would need a shared store (Redis) or a short TTL.
@@ -99,6 +99,7 @@ Every error is returned as `{"error": {"code": …, "message": …, "details": [
 | 409    | `conflict`          | A subscription with the same name (case-insensitive) exists |
 | 422    | `validation_failed` | A field is missing, has the wrong type or breaks a rule     |
 | 500    | `internal_error`    | Unexpected failure; details are logged, not returned        |
+| 503    | `service_unavailable` | `GET /api/v1/summary` could not be computed within 5 seconds, e.g. the database is down |
 
 ## Endpoints
 

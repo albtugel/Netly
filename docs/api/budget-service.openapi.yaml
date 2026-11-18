@@ -25,6 +25,8 @@ tags:
     description: Savings goals with a target amount, date and priority.
   - name: Goal contributions
     description: Top-ups of a savings goal; each one raises the goal's savedAmount in the same transaction.
+  - name: Summary
+    description: The user's monthly commitments, computed from the other resources and cached per user.
   - name: Health
     description: Liveness probe.
 
@@ -414,6 +416,44 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationFailed" }
 
+  /api/v1/summary:
+    get:
+      tags: [Summary]
+      summary: Monthly commitments of the user
+      description: |
+        Adds up what the user pays every month: the `monthlyCost` of every subscription, the `monthlyPayment` of
+        every debt and the `requiredMonthlyContribution` of every active goal. It takes three reads of the database,
+        so the result is cached in the service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60).
+
+        The `X-Cache` header says where the answer came from: `MISS` (computed now) or `HIT` (served from the cache,
+        `computedAt` shows when it was computed). Creating, updating or deleting a subscription, debt or goal and adding a
+        goal contribution drop the caller's cached summary before that write answers, so the next read is a `MISS` with fresh numbers.
+        Failures are never cached.
+
+        If the computation does not finish within 5 seconds (for example the database is down and the pool waits for a connection),
+        the answer is `503` `service_unavailable`; a still-valid cached summary is served regardless.
+      operationId: getSummary
+      responses:
+        "200":
+          description: The summary
+          headers:
+            X-Cache:
+              description: "`HIT` when served from the cache, `MISS` when computed for this request"
+              schema: { type: string, enum: [HIT, MISS] }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Summary" }
+              example:
+                subscriptionsMonthly: 9.99
+                debtsMonthly: 300
+                goalsRequiredMonthly: 100
+                totalMonthlyCommitments: 409.99
+                counts: { subscriptions: 1, debts: 1, goals: 1 }
+                computedAt: "2026-11-18T08:51:20Z"
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "500": { $ref: "#/components/responses/InternalError" }
+        "503": { $ref: "#/components/responses/ServiceUnavailable" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -634,6 +674,34 @@ components:
         contribution: { $ref: "#/components/schemas/GoalContribution" }
         goal: { $ref: "#/components/schemas/Goal" }
 
+    Summary:
+      type: object
+      required: [subscriptionsMonthly, debtsMonthly, goalsRequiredMonthly, totalMonthlyCommitments, counts, computedAt]
+      properties:
+        subscriptionsMonthly:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          description: Sum of the subscriptions' `monthlyCost`.
+        debtsMonthly:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          description: Sum of the debts' `monthlyPayment`.
+        goalsRequiredMonthly:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          description: Sum of the active goals' `requiredMonthlyContribution`.
+        totalMonthlyCommitments:
+          allOf: [{ $ref: "#/components/schemas/Money" }]
+          description: The three sums added together.
+        counts:
+          type: object
+          required: [subscriptions, debts, goals]
+          properties:
+            subscriptions: { type: integer, minimum: 0 }
+            debts: { type: integer, minimum: 0 }
+            goals: { type: integer, minimum: 0, description: Active goals only }
+        computedAt:
+          type: string
+          format: date-time
+          description: When the figures were computed; for a cached answer, earlier than the request.
+
     FieldError:
       type: object
       required: [field, code, message]
@@ -667,7 +735,7 @@ components:
             code:
               type: string
               description: Machine-readable error code
-              enum: [malformed_json, unauthorized, not_found, conflict, validation_failed, internal_error]
+              enum: [malformed_json, unauthorized, not_found, conflict, validation_failed, internal_error, service_unavailable]
             message: { type: string, description: Human-readable explanation }
             details:
               type: array
@@ -726,6 +794,26 @@ components:
             error:
               code: conflict
               message: A subscription with the same name already exists
+              details: []
+    InternalError:
+      description: Unexpected failure, e.g. the database refused the query; details are logged, not returned
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: internal_error
+              message: An unexpected error occurred
+              details: []
+    ServiceUnavailable:
+      description: The summary could not be computed in time, e.g. the database is down; try again later
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example:
+            error:
+              code: service_unavailable
+              message: The summary could not be computed in time; try again later
               details: []
     ValidationFailed:
       description: A field is missing, has the wrong type or breaks a rule

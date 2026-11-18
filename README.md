@@ -75,7 +75,7 @@ Spending Service uses the same stack as Budget Service: its data model is flat (
 
 ## Getting Started
 
-Current state: Profile Service registers users, stores bcrypt password hashes in PostgreSQL, issues 15-minute JWTs with a `user` or `admin` role and guards an admin-only route. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, and every error of both services has the same `{"error": {"code", "message", "details"}}` body. The API contracts are [`docs/api/profile-service.openapi.yaml`](docs/api/profile-service.openapi.yaml) and [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
+Current state: Profile Service registers users, stores bcrypt password hashes in PostgreSQL, issues 15-minute JWTs with a `user` or `admin` role and guards an admin-only route. Budget Service serves a JWT-protected CRUD API for subscriptions, debts and savings goals, plus goal contributions recorded in a transaction. Data lives in PostgreSQL behind a repository layer, the schema is managed by migrations, monthly equivalents are computed on read, `GET /api/v1/summary` adds them up into the user's monthly commitments behind an in-process cache, and every error of both services has the same `{"error": {"code", "message", "details"}}` body. The API contracts are [`docs/api/profile-service.openapi.yaml`](docs/api/profile-service.openapi.yaml) and [`docs/api/budget-service.openapi.yaml`](docs/api/budget-service.openapi.yaml); validation rules, the error format and a request/response example for every operation are in [`docs/api/budget-service.md`](docs/api/budget-service.md). Spending Service is designed; its implementation is planned.
 
 Requires Swift 6.2 or newer (Budget Service depends on Hummingbird 2, which needs Swift tools 6.2), or Docker. The Swift 6.4 toolchain from the Xcode beta cannot build the `swift-collections` 1.7.0 dependency yet; use Docker with it.
 
@@ -142,6 +142,19 @@ docker compose run --rm budget rollback    # revert the newest migration
 ```
 
 The server refuses to start while the schema is behind the code.
+
+### Summary cache
+
+`GET /api/v1/summary` returns what the user has to pay every month: subscriptions, debts and the contributions that active goals require. The result is cached in Budget Service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60; `0` turns the cache off).
+
+**Why caching fits Netly.** The summary is the figure the iOS home screen asks for on every launch and refresh, while it changes only when the user edits a subscription, a debt or a goal, so reads far outnumber writes. One summary costs three database reads and a calculation, and a per-user entry in the service's own memory removes most of that load without adding a component such as Redis. Because every write that affects the summary drops the user's entry at once, the user never sees stale numbers after an edit; the TTL only bounds how long an entry lives.
+
+- **Explicit invalidation.** Creating, updating or deleting a subscription, a debt or a goal, and adding a goal contribution, drop the caller's entry; other users' entries stay.
+- **Failures are not cached.** A computation that fails or takes longer than 5 seconds (for example PostgreSQL is down) answers with the usual error body (`503 service_unavailable`), nothing is stored, and the next request tries again. A still-valid entry is served meanwhile.
+- **Observable.** The `X-Cache: HIT` or `MISS` response header and the log lines `summary cache miss`, `hit`, `store`, `expired`, `invalidated` (with the `reason`) and `summary computation failed`, each with the `userId`.
+- **Limit.** The cache is per process. With several Budget Service instances each would have its own, so a shared store would be needed to keep them consistent.
+
+Measured on 2026-11-18 against the compose stack: a miss took 4.3 ms and the next two requests 1.5 and 1.6 ms; after a `PATCH`, a `DELETE` and a contribution the next read was a miss with the new figures; with PostgreSQL stopped, a cached summary was still served and a miss answered `503` after 5.0 s without hanging the service. The protocol with the real requests, timings and log fragments is [`docs/async-scenario.md`](docs/async-scenario.md); the contract is in [`docs/api/budget-service.md`](docs/api/budget-service.md#summary--apiv1summary).
 
 ### Authentication and roles
 
@@ -220,12 +233,12 @@ Without Docker networking, `swift test` inside a service directory runs every te
 
 | Kind | Profile Service | Budget Service |
 | ---- | --------------- | -------------- |
-| Unit, no network or database | 14 | 20 |
-| API through the framework's test client | 11 | 37 |
-| API and repositories against PostgreSQL | 6 | 9 |
-| Total | 31 | 66 |
+| Unit, no network or database | 14 | 24 |
+| API through the framework's test client | 11 | 51 |
+| API and repositories against PostgreSQL | 6 | 10 |
+| Total | 31 | 85 |
 
-Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format.
+Unit tests cover the business rules: email normalization and format, the 15-minute token, the rate limiter window, money and text validation, the savings-goal rules (saved amount within the target, a past target date checked only when it changes, priority 1 to 10), the monthly equivalents and partial updates. API tests pair a success with a failure for every operation: registration, login, roles, CRUD of each budget resource, goal contributions, a missing, forged or expired token on every protected route, and the error format. The summary cache is tested with a counting repository (a hit within the TTL reads nothing), an injected clock (expiry), every kind of write (invalidation), two users (isolation) and a repository that fails or hangs (failures are not cached, `503` instead of a hang).
 
 ### Isolation
 
@@ -235,12 +248,12 @@ Unit tests cover the business rules: email normalization and format, the 15-minu
 
 ### Coverage
 
-Measured on 2026-11-10 with `./scripts/test.sh` (all 97 tests passing, database suites included; a repeated run gives the same numbers):
+Measured with `./scripts/test.sh`, database suites included. Profile Service on 2026-11-10 (31 tests); Budget Service on 2026-11-18 with `./scripts/test.sh budget` after the summary cache was added (85 tests, all passing):
 
 | Service | Lines | Functions | Regions |
 | ------- | ----- | --------- | ------- |
 | Profile Service | 87.9% (385 of 438) | 83.5% | 78.4% |
-| Budget Service | 91.7% (1200 of 1309) | 89.0% | 84.7% |
+| Budget Service | 92.5% (1378 of 1490) | 90.2% | 86.4% |
 
 Where coverage is low, and why:
 
@@ -265,6 +278,7 @@ netly/
 │   │   ├── profile-service.openapi.yaml  Profile Service contract (OpenAPI 3.1)
 │   │   ├── budget-service.openapi.yaml   Budget Service contract (OpenAPI 3.1)
 │   │   └── budget-service.md             validation, error format, examples
+│   ├── async-scenario.md        summary cache: miss, hit, invalidation and database-down check
 │   ├── auth-check.md            access by role, checked against the running services
 │   ├── security-checklist.md    OWASP API checks, the rate-limit fix before and after
 │   ├── requirements.md          business problem, user stories, decomposition

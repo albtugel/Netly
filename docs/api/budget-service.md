@@ -2,7 +2,7 @@
 
 The machine-readable contract is [`budget-service.openapi.yaml`](budget-service.openapi.yaml) (OpenAPI 3.1). This page describes the same API for people: conventions, validation rules, the error format, and a request/response example for every operation.
 
-All examples below are real responses from the service running against PostgreSQL, taken on 2026-09-26; the goal contributions, the status filter and the `409` example were taken on 2026-10-07 during the run recorded in [`../verification.md`](../verification.md). Only the `Date`, `Server` and `Content-Length` headers are left out. Error bodies are shown in the `{"error": …}` format introduced on 2026-10-28; their codes and messages are the ones the service returned.
+All examples below are real responses from the service running against PostgreSQL, taken on 2026-09-26; the summary example was taken on 2026-11-18; the goal contributions, the status filter and the `409` example were taken on 2026-10-07 during the run recorded in [`../verification.md`](../verification.md). Only the `Date`, `Server` and `Content-Length` headers are left out. Error bodies are shown in the `{"error": …}` format introduced on 2026-10-28; their codes and messages are the ones the service returned.
 
 ## Conventions
 
@@ -125,6 +125,7 @@ The response is `application/json`, and the HTTP status carries the class of the
 | 409    | `conflict`          | A subscription with the same name (case-insensitive) already exists for this user     |
 | 422    | `validation_failed` | Missing field, wrong JSON type, unknown enum value, invalid date, or a broken rule    |
 | 500    | `internal_error`    | Anything unexpected; the cause is logged, the response says only "An unexpected error occurred" |
+| 503    | `service_unavailable` | `GET /api/v1/summary` could not be computed within 5 seconds, e.g. the database is down; try again later |
 
 Field-level codes:
 
@@ -584,6 +585,42 @@ Content-Type: application/json; charset=utf-8
 ```
 
 Another user's goal, or a goal that does not exist, answers `404` on both routes.
+
+### Summary — `/api/v1/summary`
+
+The user's monthly commitments, computed from the other resources and cached per user. Read-only; there is nothing to validate.
+
+| Field                     | Type    | Meaning                                                            |
+| ------------------------- | ------- | ------------------------------------------------------------------ |
+| `subscriptionsMonthly`    | money   | sum of the subscriptions' `monthlyCost`                            |
+| `debtsMonthly`            | money   | sum of the debts' `monthlyPayment`                                 |
+| `goalsRequiredMonthly`    | money   | sum of the active goals' `requiredMonthlyContribution`             |
+| `totalMonthlyCommitments` | money   | the three sums added together                                      |
+| `counts`                  | object  | `subscriptions`, `debts` and `goals` (active ones) that were summed |
+| `computedAt`              | instant | when the figures were computed; earlier than the request for a cached answer |
+
+Cache rules:
+
+- The answer is kept in the service's memory per user for `SUMMARY_CACHE_TTL_SECONDS` (default 60, `0` turns the cache off). `X-Cache: HIT` marks a cached answer, `X-Cache: MISS` one computed for this request.
+- Creating, updating or deleting a subscription, debt or goal, and adding a goal contribution, drop the caller's cached summary before that write answers, so the next read is a `MISS` with fresh figures. Another user's writes do not affect it. A write that is rejected (`404`, `409`, `422`) changes nothing and keeps the cache.
+- A failed computation is never cached. If it takes longer than 5 seconds, for example because the database is down, the answer is `503 service_unavailable`; a still-valid cached summary is served even then.
+- The cache lives in one process: with several instances each has its own, so a figure can be up to the TTL old on an instance that did not see the write.
+
+#### Get the summary
+
+```bash
+curl -i $BASE/api/v1/summary -H "Authorization: Bearer $TOKEN"
+```
+
+```http
+HTTP/1.1 200 OK
+X-Cache: MISS
+Content-Type: application/json; charset=utf-8
+
+{"computedAt":"2026-11-18T09:29:03Z","counts":{"debts":0,"goals":1,"subscriptions":1},"debtsMonthly":0,"goalsRequiredMonthly":50,"subscriptionsMonthly":19.98,"totalMonthlyCommitments":69.98}
+```
+
+Asked again within the TTL, the same body comes back with `X-Cache: HIT` and the same `computedAt`. Real requests, timings and logs, including the database being stopped: [`../async-scenario.md`](../async-scenario.md).
 
 ## Error examples
 
